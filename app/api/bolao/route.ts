@@ -188,6 +188,29 @@ function getComputedStatus(match: MatchRow): "open" | "locked" | "finished" {
   return "open";
 }
 
+function normalizeTeamName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function isDefinedTeam(team: string) {
+  const normalized = normalizeTeamName(team);
+  return !(
+    normalized.includes("a definir") ||
+    normalized.includes("finalista") ||
+    normalized.includes("vencedor") ||
+    normalized.includes("perdedor") ||
+    normalized.includes("grupo")
+  );
+}
+
+function hasDefinedTeams(match: MatchRow) {
+  return isDefinedTeam(match.home_team) && isDefinedTeam(match.away_team);
+}
+
 function toParticipant(row: ParticipantRow) {
   return {
     id: row.id,
@@ -397,6 +420,12 @@ export async function POST(request: Request) {
 
       const [match] = await supabase<MatchRow[]>(`matches?select=*&id=eq.${payload.matchId}&limit=1`);
       if (!match) return Response.json({ error: "Jogo não encontrado." }, { status: 404 });
+      if (!hasDefinedTeams(match)) {
+        return Response.json(
+          { error: "Esse jogo ainda não tem os dois times definidos." },
+          { status: 409 }
+        );
+      }
       if (getComputedStatus(match) !== "open") {
         return Response.json({ error: "Esse jogo já está bloqueado para palpites." }, { status: 409 });
       }
@@ -430,6 +459,12 @@ export async function POST(request: Request) {
 
       const [match] = await supabase<MatchRow[]>(`matches?select=*&id=eq.${payload.matchId}&limit=1`);
       if (!match) return Response.json({ error: "Jogo não encontrado." }, { status: 404 });
+      if (!hasDefinedTeams(match)) {
+        return Response.json(
+          { error: "Defina os dois times antes de lançar placar para esse jogo." },
+          { status: 409 }
+        );
+      }
       if (!hasMatchStarted(match)) {
         return Response.json(
           { error: "Esse jogo ainda não aconteceu. Resultado oficial só pode ser fechado depois da partida." },

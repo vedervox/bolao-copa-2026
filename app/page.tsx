@@ -60,6 +60,14 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatDay(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  }).format(new Date(value));
+}
+
 function normalizeTeamName(value: string) {
   return value
     .normalize("NFD")
@@ -94,8 +102,24 @@ function getMatchStatus(match: Match): Match["status"] {
   return "open";
 }
 
+function isDefinedTeam(team: string) {
+  const normalized = normalizeTeamName(team);
+  return !(
+    normalized.includes("a definir") ||
+    normalized.includes("finalista") ||
+    normalized.includes("vencedor") ||
+    normalized.includes("perdedor") ||
+    normalized.includes("grupo")
+  );
+}
+
+function hasDefinedTeams(match: Match) {
+  return isDefinedTeam(match.homeTeam) && isDefinedTeam(match.awayTeam);
+}
+
 function statusLabel(match: Match) {
   const status = getMatchStatus(match);
+  if (!hasDefinedTeams(match)) return "times pendentes";
   if (status === "finished") return "encerrado";
   if (status === "locked") return "bloqueado";
   return "aberto";
@@ -213,6 +237,36 @@ export default function Home() {
     });
   }, [groupFilter, search, tabMatches]);
 
+  const matchesByDay = useMemo(() => {
+    const groups = new Map<string, Match[]>();
+
+    filteredMatches.forEach((match) => {
+      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
+    });
+
+    return Array.from(groups.entries()).map(([dayKey, matches]) => ({
+      dayKey,
+      label: formatDay(matches[0].matchDate),
+      matches,
+    }));
+  }, [filteredMatches]);
+
+  const allMatchesByDay = useMemo(() => {
+    const groups = new Map<string, Match[]>();
+
+    data.matches.forEach((match) => {
+      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
+    });
+
+    return Array.from(groups.entries()).map(([dayKey, matches]) => ({
+      dayKey,
+      label: formatDay(matches[0].matchDate),
+      matches,
+    }));
+  }, [data.matches]);
+
   const tabGuessCount = useMemo(() => {
     if (!selectedParticipantId) return 0;
     const matchIds = new Set(tabMatches.map((match) => match.id));
@@ -220,6 +274,15 @@ export default function Home() {
       (guess) => guess.participantId === selectedParticipantId && matchIds.has(guess.matchId)
     ).length;
   }, [data.guesses, selectedParticipantId, tabMatches]);
+
+  const saveableVisibleCount = useMemo(() => {
+    if (!selectedParticipantId) return 0;
+
+    return filteredMatches.filter((match) => {
+      const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
+      return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
+    }).length;
+  }, [data.guesses, filteredMatches, selectedParticipantId]);
 
   async function post(payload: Record<string, unknown>) {
     const response = await fetch("/api/bolao", {
@@ -263,6 +326,11 @@ export default function Home() {
 
   function updateResult(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (selectedMatch && !hasDefinedTeams(selectedMatch)) {
+      setMessage("Defina os dois times antes de lançar placar para esse jogo.");
+      return;
+    }
 
     if (selectedMatch && !hasMatchStarted(selectedMatch)) {
       setMessage("Esse jogo ainda não aconteceu. O resultado oficial só pode ser fechado depois da data do jogo.");
@@ -313,7 +381,7 @@ export default function Home() {
 
     const matchesToSave = filteredMatches.filter((match) => {
       const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
-      return !alreadyGuessed && getMatchStatus(match) === "open";
+      return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
     });
 
     if (matchesToSave.length === 0) {
@@ -454,10 +522,14 @@ export default function Home() {
                   value={selectedMatch?.id ?? ""}
                   onChange={(event) => setSelectedMatchId(Number(event.target.value))}
                 >
-                  {data.matches.map((match) => (
-                    <option key={match.id} value={match.id}>
-                      {match.homeTeam} x {match.awayTeam}
-                    </option>
+                  {allMatchesByDay.map((day) => (
+                    <optgroup key={day.dayKey} label={day.label}>
+                      {day.matches.map((match) => (
+                        <option key={match.id} value={match.id}>
+                          {match.homeTeam} x {match.awayTeam}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </label>
@@ -469,9 +541,19 @@ export default function Home() {
                 Esse jogo ainda não aconteceu. Resultado oficial só depois da partida.
               </p>
             )}
+            {selectedMatch && !hasDefinedTeams(selectedMatch) && (
+              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                Placar bloqueado até os dois times estarem definidos.
+              </p>
+            )}
 
             <button
-              disabled={busy || !selectedMatch || !hasMatchStarted(selectedMatch)}
+              disabled={
+                busy ||
+                !selectedMatch ||
+                !hasDefinedTeams(selectedMatch) ||
+                !hasMatchStarted(selectedMatch)
+              }
               className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
             >
               Fechar resultado
@@ -582,7 +664,11 @@ export default function Home() {
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5e6a63]">
               <span>Mostrando {filteredMatches.length} de {tabMatches.length} jogos</span>
-              <span>{activeTab === "brasil" ? "Brasil: Marrocos, Haiti e Escócia" : "Calendário completo"}</span>
+              <span>
+                {activeTab === "brasil"
+                  ? "Brasil: Marrocos, Haiti e Escócia"
+                  : "Calendário completo por dia"}
+              </span>
             </div>
 
             <div className="mt-4 grid gap-3">
@@ -591,73 +677,98 @@ export default function Home() {
                   Nenhum jogo encontrado.
                 </div>
               ) : (
-                filteredMatches.map((match) => {
-                  const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
-                  const existingGuess = findGuess(data.guesses, selectedParticipantId, match.id);
-                  const alreadyGuessed = Boolean(existingGuess);
-                  const locked = busy || !selectedParticipantId || alreadyGuessed || getMatchStatus(match) !== "open";
-                  const brazilMatch = isBrazilMatch(match);
-
-                  return (
-                    <div
-                      key={match.id}
-                      className={`rounded-lg border p-4 transition ${
-                        brazilMatch ? "border-[#1d6b57] bg-[#e7f4ef]" : "border-[#d7dfd9] bg-white"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
-                          <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
-                        </div>
-                        <span className="rounded-full bg-[#18211f] px-3 py-1 text-xs font-bold text-white">
-                          {statusLabel(match)}
-                        </span>
-                      </div>
-
-                      {brazilMatch && (
-                        <p className="mt-3 rounded-md bg-[#1d6b57] px-3 py-2 text-sm font-black text-white">
-                          Brasil contra {getBrazilOpponent(match)}
-                        </p>
-                      )}
-
-                      <div className="mt-4 grid grid-cols-[1fr_72px_28px_72px_1fr] items-center gap-2">
-                        <strong className="truncate text-right">{match.homeTeam}</strong>
-                        <ScoreInput
-                          label=""
-                          value={draft.homeGuess}
-                          disabled={locked}
-                          onChange={(value) => updateDraft(match.id, "homeGuess", value)}
-                        />
-                        <span className="text-center font-black">x</span>
-                        <ScoreInput
-                          label=""
-                          value={draft.awayGuess}
-                          disabled={locked}
-                          onChange={(value) => updateDraft(match.id, "awayGuess", value)}
-                        />
-                        <strong className="truncate">{match.awayTeam}</strong>
-                      </div>
-
-                      {alreadyGuessed && (
-                        <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
-                          Palpite enviado por {selectedParticipant?.name}. Não pode mais alterar.
-                        </p>
-                      )}
-
-                      {getMatchStatus(match) === "locked" && !alreadyGuessed && (
-                        <p className="mt-3 rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
-                          Jogo bloqueado porque o horário já chegou.
-                        </p>
-                      )}
+                matchesByDay.map((day) => (
+                  <section key={day.dayKey} className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-lg font-black capitalize">{day.label}</h3>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#5e6a63]">
+                        {day.matches.length} jogos
+                      </span>
                     </div>
-                  );
-                })
+
+                    <div className="grid gap-3">
+                      {day.matches.map((match) => {
+                        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
+                        const existingGuess = findGuess(data.guesses, selectedParticipantId, match.id);
+                        const alreadyGuessed = Boolean(existingGuess);
+                        const teamsDefined = hasDefinedTeams(match);
+                        const locked =
+                          busy ||
+                          !selectedParticipantId ||
+                          alreadyGuessed ||
+                          !teamsDefined ||
+                          getMatchStatus(match) !== "open";
+                        const brazilMatch = isBrazilMatch(match);
+
+                        return (
+                          <div
+                            key={match.id}
+                            className={`rounded-lg border p-4 transition ${
+                              brazilMatch ? "border-[#1d6b57] bg-[#e7f4ef]" : "border-[#d7dfd9] bg-white"
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
+                                <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
+                              </div>
+                              <span className="rounded-full bg-[#18211f] px-3 py-1 text-xs font-bold text-white">
+                                {statusLabel(match)}
+                              </span>
+                            </div>
+
+                            {brazilMatch && (
+                              <p className="mt-3 rounded-md bg-[#1d6b57] px-3 py-2 text-sm font-black text-white">
+                                Brasil contra {getBrazilOpponent(match)}
+                              </p>
+                            )}
+
+                            <div className="mt-4 grid grid-cols-[1fr_72px_28px_72px_1fr] items-center gap-2">
+                              <strong className="truncate text-right">{match.homeTeam}</strong>
+                              <ScoreInput
+                                label=""
+                                value={draft.homeGuess}
+                                disabled={locked}
+                                onChange={(value) => updateDraft(match.id, "homeGuess", value)}
+                              />
+                              <span className="text-center font-black">x</span>
+                              <ScoreInput
+                                label=""
+                                value={draft.awayGuess}
+                                disabled={locked}
+                                onChange={(value) => updateDraft(match.id, "awayGuess", value)}
+                              />
+                              <strong className="truncate">{match.awayTeam}</strong>
+                            </div>
+
+                            {!teamsDefined && (
+                              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                                Placar bloqueado até os dois times estarem definidos.
+                              </p>
+                            )}
+
+                            {alreadyGuessed && (
+                              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                                Palpite enviado por {selectedParticipant?.name}. Não pode mais alterar.
+                              </p>
+                            )}
+
+                            {getMatchStatus(match) === "locked" && !alreadyGuessed && teamsDefined && (
+                              <p className="mt-3 rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
+                                Jogo bloqueado porque o horário já chegou.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))
               )}
             </div>
 
             <button
-              disabled={busy || !selectedParticipantId || filteredMatches.length === 0}
+              disabled={busy || !selectedParticipantId || saveableVisibleCount === 0}
               className="mt-5 min-h-12 w-full rounded-md bg-[#c23d2f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#c9a7a2]"
             >
               {activeTab === "brasil" ? "Salvar palpites do Brasil" : "Salvar palpites dos jogos exibidos"}
@@ -687,6 +798,21 @@ function GuessesPanel({
   selectedMatchId: number | null;
   setSelectedMatchId: (value: number) => void;
 }) {
+  const allMatchesByDay = useMemo(() => {
+    const groups = new Map<string, Match[]>();
+
+    data.matches.forEach((match) => {
+      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
+    });
+
+    return Array.from(groups.entries()).map(([dayKey, matches]) => ({
+      dayKey,
+      label: formatDay(matches[0].matchDate),
+      matches,
+    }));
+  }, [data.matches]);
+
   return (
     <div className="rounded-lg border border-[#d7dfd9] bg-white p-5">
       <h2 className="text-2xl font-black">Painel de palpites por jogo</h2>
@@ -701,10 +827,14 @@ function GuessesPanel({
           value={selectedMatchId ?? ""}
           onChange={(event) => setSelectedMatchId(Number(event.target.value))}
         >
-          {data.matches.map((match) => (
-            <option key={match.id} value={match.id}>
-              {match.homeTeam} x {match.awayTeam}
-            </option>
+          {allMatchesByDay.map((day) => (
+            <optgroup key={day.dayKey} label={day.label}>
+              {day.matches.map((match) => (
+                <option key={match.id} value={match.id}>
+                  {match.homeTeam} x {match.awayTeam}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
