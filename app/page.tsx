@@ -80,9 +80,17 @@ function getBrazilOpponent(match: Match) {
   return home === "brasil" || home === "brazil" ? match.awayTeam : match.homeTeam;
 }
 
+function hasOfficialResult(match: Match) {
+  return match.homeScore !== null && match.awayScore !== null;
+}
+
+function hasMatchStarted(match: Match) {
+  return new Date() >= new Date(match.matchDate);
+}
+
 function getMatchStatus(match: Match): Match["status"] {
-  if (match.homeScore !== null && match.awayScore !== null) return "finished";
-  if (new Date() >= new Date(match.matchDate)) return "locked";
+  if (hasOfficialResult(match) && hasMatchStarted(match)) return "finished";
+  if (hasMatchStarted(match)) return "locked";
   return "open";
 }
 
@@ -255,6 +263,12 @@ export default function Home() {
 
   function updateResult(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (selectedMatch && !hasMatchStarted(selectedMatch)) {
+      setMessage("Esse jogo ainda não aconteceu. O resultado oficial só pode ser fechado depois da data do jogo.");
+      return;
+    }
+
     send(
       {
         action: "updateResult",
@@ -263,6 +277,18 @@ export default function Home() {
         awayScore,
       },
       "Resultado atualizado e ranking recalculado."
+    );
+  }
+
+  function clearResult() {
+    if (!selectedMatch) return;
+
+    send(
+      {
+        action: "clearResult",
+        matchId: selectedMatch.id,
+      },
+      "Resultado removido. O jogo voltou a ficar aberto até a data da partida."
     );
   }
 
@@ -418,7 +444,7 @@ export default function Home() {
           >
             <h2 className="text-xl font-black">Resultado oficial</h2>
             <p className="mt-1 text-sm text-[#5e6a63]">
-              Use somente depois do jogo. Com placar oficial preenchido, o jogo fica encerrado.
+              Use somente depois que a partida acontecer. Antes da data do jogo, o sistema não deixa fechar resultado.
             </p>
             <div className="mt-4 grid grid-cols-[1fr_72px_72px] items-end gap-3">
               <label className="text-sm font-semibold">
@@ -438,12 +464,29 @@ export default function Home() {
               <ScoreInput label="Casa" value={homeScore} onChange={setHomeScore} />
               <ScoreInput label="Fora" value={awayScore} onChange={setAwayScore} />
             </div>
+            {selectedMatch && !hasMatchStarted(selectedMatch) && (
+              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                Esse jogo ainda não aconteceu. Resultado oficial só depois da partida.
+              </p>
+            )}
+
             <button
-              disabled={busy || !selectedMatch}
-              className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:bg-[#9aa79f]"
+              disabled={busy || !selectedMatch || !hasMatchStarted(selectedMatch)}
+              className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
             >
               Fechar resultado
             </button>
+
+            {selectedMatch && hasOfficialResult(selectedMatch) && (
+              <button
+                type="button"
+                onClick={clearResult}
+                disabled={busy}
+                className="mt-3 min-h-12 w-full rounded-md border border-[#c23d2f] px-5 font-bold text-[#c23d2f] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Limpar resultado lançado por engano
+              </button>
+            )}
           </form>
         </div>
 
@@ -676,6 +719,23 @@ function GuessesPanel({
             <p className="mt-1 text-sm text-[#5e6a63]">
               {formatDate(selectedMatch.matchDate)} · {statusLabel(selectedMatch)}
             </p>
+
+            {selectedMatch.homeScore !== null && selectedMatch.awayScore !== null ? (
+              <div className="mt-4 inline-flex items-center gap-3 rounded-lg bg-[#f0c44c] px-4 py-3 font-black text-[#18211f]">
+                <span>
+                  {hasMatchStarted(selectedMatch)
+                    ? "Resultado oficial"
+                    : "Resultado lançado antes da data"}
+                </span>
+                <span className="text-2xl">
+                  {selectedMatch.homeScore} x {selectedMatch.awayScore}
+                </span>
+              </div>
+            ) : (
+              <div className="mt-4 inline-flex rounded-lg bg-[#edf1ee] px-4 py-3 text-sm font-bold text-[#5e6a63]">
+                Resultado oficial ainda não informado
+              </div>
+            )}
           </div>
 
           {data.participants.length === 0 ? (

@@ -174,9 +174,17 @@ async function supabase<T>(path: string, init: RequestInit & { prefer?: string }
   return (await response.json()) as T;
 }
 
+function hasOfficialResult(match: MatchRow) {
+  return match.home_score !== null && match.away_score !== null;
+}
+
+function hasMatchStarted(match: MatchRow) {
+  return new Date() >= new Date(match.match_date);
+}
+
 function getComputedStatus(match: MatchRow): "open" | "locked" | "finished" {
-  if (match.home_score !== null && match.away_score !== null) return "finished";
-  if (new Date() >= new Date(match.match_date)) return "locked";
+  if (hasOfficialResult(match) && hasMatchStarted(match)) return "finished";
+  if (hasMatchStarted(match)) return "locked";
   return "open";
 }
 
@@ -419,6 +427,16 @@ export async function POST(request: Request) {
 
     if (payload.action === "updateResult") {
       if (!payload.matchId) return Response.json({ error: "Escolha um jogo." }, { status: 400 });
+
+      const [match] = await supabase<MatchRow[]>(`matches?select=*&id=eq.${payload.matchId}&limit=1`);
+      if (!match) return Response.json({ error: "Jogo não encontrado." }, { status: 404 });
+      if (!hasMatchStarted(match)) {
+        return Response.json(
+          { error: "Esse jogo ainda não aconteceu. Resultado oficial só pode ser fechado depois da partida." },
+          { status: 409 }
+        );
+      }
+
       const homeScore = payload.homeScore;
       const awayScore = payload.awayScore;
       const hasResult =
@@ -437,6 +455,22 @@ export async function POST(request: Request) {
           home_score: hasResult ? homeScore : null,
           away_score: hasResult ? awayScore : null,
           status: hasResult ? "finished" : "open",
+        }),
+        prefer: "return=minimal",
+      });
+
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "clearResult") {
+      if (!payload.matchId) return Response.json({ error: "Escolha um jogo." }, { status: 400 });
+
+      await supabase<null>(`matches?id=eq.${payload.matchId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          home_score: null,
+          away_score: null,
+          status: "open",
         }),
         prefer: "return=minimal",
       });
