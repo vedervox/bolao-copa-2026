@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -41,7 +42,7 @@ type GuessDraft = {
   awayGuess: number;
 };
 
-type GuessTab = "brasil" | "outros";
+type GuessTab = "brasil" | "todos";
 
 const emptyData: BolaoData = {
   participants: [],
@@ -59,14 +60,44 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function isBrazilMatch(match: Match) {
-  return match.homeTeam === "Brasil" || match.awayTeam === "Brasil";
+function normalizeTeamName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
-function statusLabel(status: Match["status"]) {
+function isBrazilMatch(match: Match) {
+  const home = normalizeTeamName(match.homeTeam);
+  const away = normalizeTeamName(match.awayTeam);
+
+  return home === "brasil" || home === "brazil" || away === "brasil" || away === "brazil";
+}
+
+function getBrazilOpponent(match: Match) {
+  const home = normalizeTeamName(match.homeTeam);
+  return home === "brasil" || home === "brazil" ? match.awayTeam : match.homeTeam;
+}
+
+function getMatchStatus(match: Match): Match["status"] {
+  if (match.homeScore !== null && match.awayScore !== null) return "finished";
+  if (new Date() >= new Date(match.matchDate)) return "locked";
+  return "open";
+}
+
+function statusLabel(match: Match) {
+  const status = getMatchStatus(match);
   if (status === "finished") return "encerrado";
   if (status === "locked") return "bloqueado";
   return "aberto";
+}
+
+function findGuess(guesses: Guess[], participantId: number | null, matchId: number) {
+  if (!participantId) return undefined;
+  return guesses.find(
+    (guess) => guess.participantId === participantId && guess.matchId === matchId
+  );
 }
 
 export default function Home() {
@@ -87,9 +118,7 @@ export default function Home() {
     const response = await fetch("/api/bolao", { cache: "no-store" });
     const nextData = (await response.json()) as BolaoData & { error?: string };
 
-    if (!response.ok) {
-      throw new Error(nextData.error ?? "Não foi possível carregar.");
-    }
+    if (!response.ok) throw new Error(nextData.error ?? "Não foi possível carregar.");
 
     setData(nextData);
     setSelectedParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
@@ -116,6 +145,9 @@ export default function Home() {
     ) {
       setHomeScore(selectedMatch.homeScore);
       setAwayScore(selectedMatch.awayScore);
+    } else {
+      setHomeScore(0);
+      setAwayScore(0);
     }
   }, [selectedMatch]);
 
@@ -128,12 +160,7 @@ export default function Home() {
     const nextDrafts: Record<number, GuessDraft> = {};
 
     data.matches.forEach((match) => {
-      const existingGuess = data.guesses.find(
-        (guess) =>
-          guess.participantId === selectedParticipantId &&
-          guess.matchId === match.id
-      );
-
+      const existingGuess = findGuess(data.guesses, selectedParticipantId, match.id);
       nextDrafts[match.id] = {
         homeGuess: existingGuess?.homeGuess ?? 0,
         awayGuess: existingGuess?.awayGuess ?? 0,
@@ -141,32 +168,38 @@ export default function Home() {
     });
 
     setDrafts(nextDrafts);
-  }, [data.matches, data.guesses, selectedParticipantId]);
+  }, [data.guesses, data.matches, selectedParticipantId]);
 
   const leader = data.participants[0];
 
-  const groupOptions = useMemo(() => {
-    return Array.from(new Set(data.matches.map((match) => match.groupName))).sort();
-  }, [data.matches]);
+  const selectedParticipant = useMemo(
+    () => data.participants.find((participant) => participant.id === selectedParticipantId),
+    [data.participants, selectedParticipantId]
+  );
+
+  const brazilMatches = useMemo(
+    () => data.matches.filter(isBrazilMatch),
+    [data.matches]
+  );
 
   const tabMatches = useMemo(() => {
-    return data.matches.filter((match) =>
-      activeTab === "brasil" ? isBrazilMatch(match) : !isBrazilMatch(match)
-    );
-  }, [activeTab, data.matches]);
+    return activeTab === "brasil" ? brazilMatches : data.matches;
+  }, [activeTab, brazilMatches, data.matches]);
+
+  const groupOptions = useMemo(() => {
+    return Array.from(new Set(tabMatches.map((match) => match.groupName))).sort();
+  }, [tabMatches]);
 
   const filteredMatches = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+    const normalizedSearch = normalizeTeamName(search);
 
     return tabMatches.filter((match) => {
-      const matchesGroup =
-        groupFilter === "todos" || match.groupName === groupFilter;
-
+      const matchesGroup = groupFilter === "todos" || match.groupName === groupFilter;
       const matchesSearch =
         !normalizedSearch ||
-        match.homeTeam.toLowerCase().includes(normalizedSearch) ||
-        match.awayTeam.toLowerCase().includes(normalizedSearch) ||
-        match.groupName.toLowerCase().includes(normalizedSearch);
+        normalizeTeamName(match.homeTeam).includes(normalizedSearch) ||
+        normalizeTeamName(match.awayTeam).includes(normalizedSearch) ||
+        normalizeTeamName(match.groupName).includes(normalizedSearch);
 
       return matchesGroup && matchesSearch;
     });
@@ -174,13 +207,9 @@ export default function Home() {
 
   const tabGuessCount = useMemo(() => {
     if (!selectedParticipantId) return 0;
-
-    const tabMatchIds = new Set(tabMatches.map((match) => match.id));
-
+    const matchIds = new Set(tabMatches.map((match) => match.id));
     return data.guesses.filter(
-      (guess) =>
-        guess.participantId === selectedParticipantId &&
-        tabMatchIds.has(guess.matchId)
+      (guess) => guess.participantId === selectedParticipantId && matchIds.has(guess.matchId)
     ).length;
   }, [data.guesses, selectedParticipantId, tabMatches]);
 
@@ -191,15 +220,8 @@ export default function Home() {
       body: JSON.stringify(payload),
     });
 
-    const result = (await response.json()) as {
-      error?: string;
-      participant?: Participant;
-    };
-
-    if (!response.ok) {
-      throw new Error(result.error ?? "Não foi possível salvar.");
-    }
-
+    const result = (await response.json()) as { error?: string; participant?: Participant };
+    if (!response.ok) throw new Error(result.error ?? "Não foi possível salvar.");
     return result;
   }
 
@@ -209,11 +231,7 @@ export default function Home() {
 
     try {
       const result = await post(payload);
-
-      if (result.participant) {
-        setSelectedParticipantId(result.participant.id);
-      }
-
+      if (result.participant) setSelectedParticipantId(result.participant.id);
       await load();
       setMessage(success);
     } catch (error) {
@@ -225,7 +243,6 @@ export default function Home() {
 
   function addParticipant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     const participantName = name.trim();
     if (!participantName) return;
 
@@ -233,13 +250,11 @@ export default function Home() {
       { action: "addParticipant", name: participantName },
       `${participantName} entrou no bolão.`
     );
-
     setName("");
   }
 
   function updateResult(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     send(
       {
         action: "updateResult",
@@ -270,10 +285,13 @@ export default function Home() {
       return;
     }
 
-    const matchesToSave = filteredMatches.filter((match) => match.status === "open");
+    const matchesToSave = filteredMatches.filter((match) => {
+      const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
+      return !alreadyGuessed && getMatchStatus(match) === "open";
+    });
 
     if (matchesToSave.length === 0) {
-      setMessage("Nenhum jogo aberto para salvar nesta lista.");
+      setMessage("Não há jogos disponíveis para salvar nesta lista.");
       return;
     }
 
@@ -282,11 +300,7 @@ export default function Home() {
 
     try {
       for (const match of matchesToSave) {
-        const draft = drafts[match.id] ?? {
-          homeGuess: 0,
-          awayGuess: 0,
-        };
-
+        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
         await post({
           action: "saveGuess",
           participantId: selectedParticipantId,
@@ -297,11 +311,10 @@ export default function Home() {
       }
 
       await load();
-
       setMessage(
         activeTab === "brasil"
-          ? "Palpites dos jogos do Brasil salvos."
-          : "Palpites dos outros jogos salvos."
+          ? "Palpites dos jogos do Brasil salvos e bloqueados."
+          : "Palpites dos jogos selecionados salvos e bloqueados."
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro ao salvar.");
@@ -330,14 +343,14 @@ export default function Home() {
                   Bolão da Copa
                 </h1>
               </div>
-
               <div className="hidden h-20 w-20 place-items-center rounded-full bg-[#1d6b57] text-4xl text-white shadow-sm sm:grid">
                 26
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <SummaryCard label="Participantes" value={data.participants.length} />
+              <SummaryCard label="Jogos" value={data.matches.length} />
               <SummaryCard label="Palpites" value={data.guesses.length} />
               <SummaryCard label="Líder" value={leader?.name ?? "-"} />
             </div>
@@ -350,7 +363,6 @@ export default function Home() {
             <label className="text-sm font-semibold text-[#405047]" htmlFor="name">
               Novo participante
             </label>
-
             <div className="mt-3 flex flex-col gap-3 sm:flex-row">
               <input
                 id="name"
@@ -359,7 +371,6 @@ export default function Home() {
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Nome da pessoa"
               />
-
               <button
                 disabled={busy || !name.trim()}
                 className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
@@ -367,22 +378,18 @@ export default function Home() {
                 Adicionar
               </button>
             </div>
-
             <p className="mt-4 text-sm text-[#5e6a63]">{message}</p>
           </form>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-6 px-5 py-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
+      <section className="mx-auto grid max-w-7xl gap-6 px-5 py-6 lg:grid-cols-[0.75fr_1.25fr] lg:px-8">
         <div className="space-y-6">
           <div>
             <h2 className="text-2xl font-black">Ranking</h2>
-
             <div className="mt-3 overflow-hidden rounded-lg border border-[#d7dfd9] bg-white">
               {data.participants.length === 0 ? (
-                <p className="p-5 text-[#5e6a63]">
-                  Adicione a primeira pessoa da família.
-                </p>
+                <p className="p-5 text-[#5e6a63]">Adicione a primeira pessoa da família.</p>
               ) : (
                 data.participants.map((participant, index) => (
                   <div
@@ -392,14 +399,12 @@ export default function Home() {
                     <span className="grid h-10 w-10 place-items-center rounded-full bg-[#f0c44c] font-black">
                       {index + 1}
                     </span>
-
                     <div className="min-w-0">
                       <p className="truncate font-bold">{participant.name}</p>
                       <p className="text-sm text-[#5e6a63]">
                         {participant.exact} cravados · {participant.guesses} palpites
                       </p>
                     </div>
-
                     <strong className="text-2xl">{participant.total}</strong>
                   </div>
                 ))
@@ -412,11 +417,9 @@ export default function Home() {
             className="rounded-lg border border-[#d7dfd9] bg-white p-5"
           >
             <h2 className="text-xl font-black">Resultado oficial</h2>
-
             <p className="mt-1 text-sm text-[#5e6a63]">
-              Atualize depois do jogo para recalcular os pontos.
+              Use somente depois do jogo. Com placar oficial preenchido, o jogo fica encerrado.
             </p>
-
             <div className="mt-4 grid grid-cols-[1fr_72px_72px] items-end gap-3">
               <label className="text-sm font-semibold">
                 Jogo
@@ -432,11 +435,9 @@ export default function Home() {
                   ))}
                 </select>
               </label>
-
               <ScoreInput label="Casa" value={homeScore} onChange={setHomeScore} />
               <ScoreInput label="Fora" value={awayScore} onChange={setAwayScore} />
             </div>
-
             <button
               disabled={busy || !selectedMatch}
               className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:bg-[#9aa79f]"
@@ -455,70 +456,73 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-black">Fazer palpites</h2>
                 <p className="mt-1 text-sm text-[#5e6a63]">
-                  Preencha vários jogos e salve tudo de uma vez.
+                  Cada pessoa só pode salvar uma vez por jogo. Depois de salvo, bloqueia.
                 </p>
               </div>
-
               <div className="rounded-lg bg-[#e7f4ef] px-4 py-3 text-sm font-bold text-[#1d6b57]">
-                {tabGuessCount} de {tabMatches.length} preenchidos
+                {tabGuessCount} de {tabMatches.length} palpites
               </div>
             </div>
 
-            <div className="mt-4">
-              <label className="text-sm font-semibold">
-                Participante
-                <select
-                  className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                  value={selectedParticipantId ?? ""}
-                  onChange={(event) => setSelectedParticipantId(Number(event.target.value))}
-                >
-                  {data.participants.length === 0 && (
-                    <option value="">Adicione um participante</option>
-                  )}
-
-                  {data.participants.map((participant) => (
-                    <option key={participant.id} value={participant.id}>
-                      {participant.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <label className="mt-4 block text-sm font-semibold">
+              Participante
+              <select
+                className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                value={selectedParticipantId ?? ""}
+                onChange={(event) => setSelectedParticipantId(Number(event.target.value))}
+              >
+                {data.participants.length === 0 && <option value="">Adicione um participante</option>}
+                {data.participants.map((participant) => (
+                  <option key={participant.id} value={participant.id}>
+                    {participant.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f6f4] p-1">
               <button
                 type="button"
                 onClick={() => changeTab("brasil")}
                 className={`min-h-11 rounded-md px-3 text-sm font-black transition ${
-                  activeTab === "brasil"
-                    ? "bg-[#1d6b57] text-white shadow-sm"
-                    : "text-[#405047]"
+                  activeTab === "brasil" ? "bg-[#1d6b57] text-white shadow-sm" : "text-[#405047]"
                 }`}
               >
                 🇧🇷 Jogos do Brasil
               </button>
-
               <button
                 type="button"
-                onClick={() => changeTab("outros")}
+                onClick={() => changeTab("todos")}
                 className={`min-h-11 rounded-md px-3 text-sm font-black transition ${
-                  activeTab === "outros"
-                    ? "bg-[#1d6b57] text-white shadow-sm"
-                    : "text-[#405047]"
+                  activeTab === "todos" ? "bg-[#1d6b57] text-white shadow-sm" : "text-[#405047]"
                 }`}
               >
-                🌎 Outros jogos
+                🌎 Todos os jogos
               </button>
             </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px]">
+            {activeTab === "brasil" && brazilMatches.length > 0 && (
+              <div className="mt-4 grid gap-2 rounded-lg border border-[#1d6b57] bg-[#e7f4ef] p-4 sm:grid-cols-3">
+                {brazilMatches.map((match) => (
+                  <button
+                    type="button"
+                    key={match.id}
+                    onClick={() => setSelectedMatchId(match.id)}
+                    className="rounded-md bg-white px-3 py-2 text-left text-sm font-bold text-[#1d6b57] shadow-sm"
+                  >
+                    Brasil x {getBrazilOpponent(match)}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_190px]">
               <input
                 className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Buscar seleção ou fase"
               />
-
               <select
                 className="min-h-12 rounded-md border border-[#b8c6bd] px-3"
                 value={groupFilter}
@@ -533,16 +537,9 @@ export default function Home() {
               </select>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3 text-sm text-[#5e6a63]">
-              <span>
-                Mostrando {filteredMatches.length} de {tabMatches.length} jogos
-              </span>
-
-              <span>
-                {activeTab === "brasil"
-                  ? "Somente partidas do Brasil"
-                  : "Todos os jogos sem o Brasil"}
-              </span>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5e6a63]">
+              <span>Mostrando {filteredMatches.length} de {tabMatches.length} jogos</span>
+              <span>{activeTab === "brasil" ? "Brasil: Marrocos, Haiti e Escócia" : "Calendário completo"}</span>
             </div>
 
             <div className="mt-4 grid gap-3">
@@ -552,70 +549,62 @@ export default function Home() {
                 </div>
               ) : (
                 filteredMatches.map((match) => {
-                  const draft = drafts[match.id] ?? {
-                    homeGuess: 0,
-                    awayGuess: 0,
-                  };
-
-                  const locked = match.status !== "open" || busy || !selectedParticipantId;
+                  const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
+                  const existingGuess = findGuess(data.guesses, selectedParticipantId, match.id);
+                  const alreadyGuessed = Boolean(existingGuess);
+                  const locked = busy || !selectedParticipantId || alreadyGuessed || getMatchStatus(match) !== "open";
                   const brazilMatch = isBrazilMatch(match);
 
                   return (
                     <div
                       key={match.id}
                       className={`rounded-lg border p-4 transition ${
-                        brazilMatch
-                          ? "border-[#1d6b57] bg-[#e7f4ef]"
-                          : "border-[#d7dfd9] bg-white"
+                        brazilMatch ? "border-[#1d6b57] bg-[#e7f4ef]" : "border-[#d7dfd9] bg-white"
                       }`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-bold text-[#1d6b57]">
-                            {match.groupName}
-                          </p>
-                          <p className="mt-1 text-sm text-[#5e6a63]">
-                            {formatDate(match.matchDate)}
-                          </p>
+                          <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
+                          <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
                         </div>
-
                         <span className="rounded-full bg-[#18211f] px-3 py-1 text-xs font-bold text-white">
-                          {statusLabel(match.status)}
+                          {statusLabel(match)}
                         </span>
                       </div>
 
-                      <div className="mt-4 grid grid-cols-[1fr_72px_28px_72px_1fr] items-center gap-2">
-                        <strong className="truncate text-right">
-                          {match.homeTeam}
-                        </strong>
+                      {brazilMatch && (
+                        <p className="mt-3 rounded-md bg-[#1d6b57] px-3 py-2 text-sm font-black text-white">
+                          Brasil contra {getBrazilOpponent(match)}
+                        </p>
+                      )}
 
+                      <div className="mt-4 grid grid-cols-[1fr_72px_28px_72px_1fr] items-center gap-2">
+                        <strong className="truncate text-right">{match.homeTeam}</strong>
                         <ScoreInput
                           label=""
                           value={draft.homeGuess}
-                          onChange={(value) =>
-                            updateDraft(match.id, "homeGuess", value)
-                          }
                           disabled={locked}
+                          onChange={(value) => updateDraft(match.id, "homeGuess", value)}
                         />
-
                         <span className="text-center font-black">x</span>
-
                         <ScoreInput
                           label=""
                           value={draft.awayGuess}
-                          onChange={(value) =>
-                            updateDraft(match.id, "awayGuess", value)
-                          }
                           disabled={locked}
+                          onChange={(value) => updateDraft(match.id, "awayGuess", value)}
                         />
-
                         <strong className="truncate">{match.awayTeam}</strong>
                       </div>
 
-                      {(match.homeScore !== null || match.awayScore !== null) && (
-                        <p className="mt-3 text-center text-sm font-semibold text-[#5e6a63]">
-                          Resultado oficial: {match.homeScore ?? "-"} x{" "}
-                          {match.awayScore ?? "-"}
+                      {alreadyGuessed && (
+                        <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                          Palpite enviado por {selectedParticipant?.name}. Não pode mais alterar.
+                        </p>
+                      )}
+
+                      {getMatchStatus(match) === "locked" && !alreadyGuessed && (
+                        <p className="mt-3 rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
+                          Jogo bloqueado porque o horário já chegou.
                         </p>
                       )}
                     </div>
@@ -628,62 +617,106 @@ export default function Home() {
               disabled={busy || !selectedParticipantId || filteredMatches.length === 0}
               className="mt-5 min-h-12 w-full rounded-md bg-[#c23d2f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#c9a7a2]"
             >
-              {activeTab === "brasil"
-                ? "Salvar palpites do Brasil"
-                : "Salvar palpites dos outros jogos"}
+              {activeTab === "brasil" ? "Salvar palpites do Brasil" : "Salvar palpites dos jogos exibidos"}
             </button>
           </form>
 
-          <div>
-            <h2 className="text-2xl font-black">Jogos cadastrados</h2>
-
-            <div className="mt-3 grid gap-3">
-              {data.matches.map((match) => (
-                <button
-                  key={match.id}
-                  onClick={() => setSelectedMatchId(match.id)}
-                  className={`rounded-lg border p-4 text-left transition ${
-                    selectedMatch?.id === match.id
-                      ? "border-[#1d6b57] bg-white shadow-sm"
-                      : "border-[#d7dfd9] bg-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-[#5e6a63]">
-                      {formatDate(match.matchDate)}
-                    </p>
-
-                    <span className="rounded-full bg-[#18211f] px-3 py-1 text-xs font-bold text-white">
-                      {statusLabel(match.status)}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-                    <strong className="truncate text-right">{match.homeTeam}</strong>
-
-                    <span className="rounded-md bg-[#f0c44c] px-3 py-2 font-black">
-                      {match.homeScore ?? "-"} x {match.awayScore ?? "-"}
-                    </span>
-
-                    <strong className="truncate">{match.awayTeam}</strong>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          <GuessesPanel
+            data={data}
+            selectedMatch={selectedMatch}
+            selectedMatchId={selectedMatchId}
+            setSelectedMatchId={setSelectedMatchId}
+          />
         </div>
       </section>
     </main>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
+function GuessesPanel({
+  data,
+  selectedMatch,
+  selectedMatchId,
+  setSelectedMatchId,
 }: {
-  label: string;
-  value: string | number;
+  data: BolaoData;
+  selectedMatch: Match | undefined;
+  selectedMatchId: number | null;
+  setSelectedMatchId: (value: number) => void;
 }) {
+  return (
+    <div className="rounded-lg border border-[#d7dfd9] bg-white p-5">
+      <h2 className="text-2xl font-black">Painel de palpites por jogo</h2>
+      <p className="mt-1 text-sm text-[#5e6a63]">
+        Veja o palpite que cada pessoa deu para a partida escolhida.
+      </p>
+
+      <label className="mt-4 block text-sm font-semibold">
+        Escolha o jogo
+        <select
+          className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+          value={selectedMatchId ?? ""}
+          onChange={(event) => setSelectedMatchId(Number(event.target.value))}
+        >
+          {data.matches.map((match) => (
+            <option key={match.id} value={match.id}>
+              {match.homeTeam} x {match.awayTeam}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {selectedMatch && (
+        <div className="mt-4 overflow-hidden rounded-lg border border-[#e7ede9]">
+          <div className="bg-[#f3f6f4] p-4">
+            <p className="text-sm font-bold text-[#1d6b57]">{selectedMatch.groupName}</p>
+            <h3 className="mt-1 text-xl font-black">
+              {selectedMatch.homeTeam} x {selectedMatch.awayTeam}
+            </h3>
+            <p className="mt-1 text-sm text-[#5e6a63]">
+              {formatDate(selectedMatch.matchDate)} · {statusLabel(selectedMatch)}
+            </p>
+          </div>
+
+          {data.participants.length === 0 ? (
+            <p className="p-4 text-[#5e6a63]">Nenhum participante cadastrado.</p>
+          ) : (
+            data.participants.map((participant) => {
+              const guess = data.guesses.find(
+                (item) => item.participantId === participant.id && item.matchId === selectedMatch.id
+              );
+
+              return (
+                <div
+                  key={participant.id}
+                  className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-[#e7ede9] p-4"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-bold">{participant.name}</p>
+                    <p className="text-sm text-[#5e6a63]">
+                      {participant.exact} cravados · {participant.total} pontos
+                    </p>
+                  </div>
+                  {guess ? (
+                    <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
+                      {guess.homeGuess} x {guess.awayGuess}
+                    </strong>
+                  ) : (
+                    <span className="rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
+                      Sem palpite
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-[#d7dfd9] bg-white p-4">
       <p className="text-sm text-[#5e6a63]">{label}</p>
