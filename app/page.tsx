@@ -100,7 +100,11 @@ export default function Home() {
   }, [selectedGuess]);
 
   useEffect(() => {
-    if (selectedMatch?.homeScore !== null && selectedMatch?.awayScore !== null) {
+    if (
+      selectedMatch &&
+      selectedMatch.homeScore !== null &&
+      selectedMatch.awayScore !== null
+    ) {
       setHomeScore(selectedMatch.homeScore);
       setAwayScore(selectedMatch.awayScore);
     }
