@@ -232,11 +232,15 @@ export async function POST(request: Request) {
       if (!payload.participantId || !payload.matchId) {
         return Response.json({ error: "Escolha participante e jogo." }, { status: 400 });
       }
+      const homeGuess = payload.homeGuess;
+      const awayGuess = payload.awayGuess;
       if (
-        !Number.isInteger(payload.homeGuess) ||
-        !Number.isInteger(payload.awayGuess) ||
-        payload.homeGuess < 0 ||
-        payload.awayGuess < 0
+        !Number.isInteger(homeGuess) ||
+        !Number.isInteger(awayGuess) ||
+        homeGuess === undefined ||
+        awayGuess === undefined ||
+        homeGuess < 0 ||
+        awayGuess < 0
       ) {
         return Response.json({ error: "Palpite invalido." }, { status: 400 });
       }
@@ -246,8 +250,8 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           participant_id: payload.participantId,
           match_id: payload.matchId,
-          home_guess: payload.homeGuess,
-          away_guess: payload.awayGuess,
+          home_guess: homeGuess,
+          away_guess: awayGuess,
           updated_at: new Date().toISOString(),
         }),
         prefer: "resolution=merge-duplicates,return=representation",
@@ -258,19 +262,23 @@ export async function POST(request: Request) {
 
     if (payload.action === "updateResult") {
       if (!payload.matchId) return Response.json({ error: "Escolha um jogo." }, { status: 400 });
+      const homeScore = payload.homeScore;
+      const awayScore = payload.awayScore;
       const hasResult =
-        Number.isInteger(payload.homeScore) &&
-        Number.isInteger(payload.awayScore) &&
-        payload.homeScore !== null &&
-        payload.awayScore !== null &&
-        payload.homeScore >= 0 &&
-        payload.awayScore >= 0;
+        Number.isInteger(homeScore) &&
+        Number.isInteger(awayScore) &&
+        homeScore !== null &&
+        awayScore !== null &&
+        homeScore !== undefined &&
+        awayScore !== undefined &&
+        homeScore >= 0 &&
+        awayScore >= 0;
 
       await supabase<null>(`matches?id=eq.${payload.matchId}`, {
         method: "PATCH",
         body: JSON.stringify({
-          home_score: hasResult ? payload.homeScore : null,
-          away_score: hasResult ? payload.awayScore : null,
+          home_score: hasResult ? homeScore : null,
+          away_score: hasResult ? awayScore : null,
           status: hasResult ? "finished" : "open",
         }),
         prefer: "return=minimal",
