@@ -7,6 +7,7 @@ type Participant = {
   id: number;
   name: string;
   avatar: string;
+  hasLogin: boolean;
   total: number;
   exact: number;
   guesses: number;
@@ -137,6 +138,9 @@ export default function Home() {
   const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
   const [name, setName] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [loginParticipantId, setLoginParticipantId] = useState<number | null>(null);
+  const [viewedParticipantId, setViewedParticipantId] = useState<number | null>(null);
   const [homeScore, setHomeScore] = useState(0);
   const [awayScore, setAwayScore] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -153,7 +157,8 @@ export default function Home() {
     if (!response.ok) throw new Error(nextData.error ?? "Não foi possível carregar.");
 
     setData(nextData);
-    setSelectedParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
+    setLoginParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
+    setViewedParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
     setSelectedMatchId((current) => current ?? nextData.matches[0]?.id ?? null);
     setMessage("Tudo pronto para os palpites.");
   }
@@ -207,6 +212,16 @@ export default function Home() {
   const selectedParticipant = useMemo(
     () => data.participants.find((participant) => participant.id === selectedParticipantId),
     [data.participants, selectedParticipantId]
+  );
+
+  const loginParticipant = useMemo(
+    () => data.participants.find((participant) => participant.id === loginParticipantId),
+    [data.participants, loginParticipantId]
+  );
+
+  const viewedParticipant = useMemo(
+    () => data.participants.find((participant) => participant.id === viewedParticipantId),
+    [data.participants, viewedParticipantId]
   );
 
   const brazilMatches = useMemo(
@@ -302,7 +317,11 @@ export default function Home() {
 
     try {
       const result = await post(payload);
-      if (result.participant) setSelectedParticipantId(result.participant.id);
+      if (result.participant) {
+        setSelectedParticipantId(result.participant.id);
+        setLoginParticipantId(result.participant.id);
+        setViewedParticipantId(result.participant.id);
+      }
       await load();
       setMessage(success);
     } catch (error) {
@@ -318,10 +337,46 @@ export default function Home() {
     if (!participantName) return;
 
     send(
-      { action: "addParticipant", name: participantName },
+      { action: "addParticipant", name: participantName, accessCode },
       `${participantName} entrou no bolão.`
     );
     setName("");
+  }
+
+  async function login() {
+    if (!loginParticipantId) {
+      setMessage("Escolha quem está entrando.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage("Entrando...");
+
+    try {
+      const result = await post({
+        action: "loginParticipant",
+        participantId: loginParticipantId,
+        accessCode,
+      });
+
+      if (result.participant) {
+        setSelectedParticipantId(result.participant.id);
+        setViewedParticipantId(result.participant.id);
+      }
+
+      await load();
+      setMessage(`${result.participant?.name ?? "Participante"} entrou no bolão.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao entrar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function logout() {
+    setSelectedParticipantId(null);
+    setAccessCode("");
+    setMessage("Escolha seu nome e entre com seu PIN antes de palpitar.");
   }
 
   function updateResult(event: FormEvent<HTMLFormElement>) {
@@ -401,6 +456,7 @@ export default function Home() {
           matchId: match.id,
           homeGuess: draft.homeGuess,
           awayGuess: draft.awayGuess,
+          accessCode,
         });
       }
 
@@ -421,6 +477,39 @@ export default function Home() {
     setActiveTab(tab);
     setSearch("");
     setGroupFilter("todos");
+  }
+
+  async function deleteGuess(guess: Guess) {
+    if (!selectedParticipantId || guess.participantId !== selectedParticipantId) {
+      setMessage("Entre como esse participante para apagar o palpite.");
+      return;
+    }
+
+    send(
+      {
+        action: "deleteGuess",
+        participantId: selectedParticipantId,
+        guessId: guess.id,
+        accessCode,
+      },
+      "Palpite apagado."
+    );
+  }
+
+  async function deleteViewedParticipantGuesses() {
+    if (!selectedParticipantId || viewedParticipantId !== selectedParticipantId) {
+      setMessage("Entre como esse participante para apagar os palpites dele.");
+      return;
+    }
+
+    send(
+      {
+        action: "deleteParticipantGuesses",
+        participantId: selectedParticipantId,
+        accessCode,
+      },
+      "Todos os palpites desse participante foram apagados."
+    );
   }
 
   return (
@@ -457,7 +546,7 @@ export default function Home() {
             <label className="text-sm font-semibold text-[#405047]" htmlFor="name">
               Novo participante
             </label>
-            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_140px]">
               <input
                 id="name"
                 className="min-h-12 flex-1 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
@@ -465,9 +554,17 @@ export default function Home() {
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Nome da pessoa"
               />
+              <input
+                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                value={accessCode}
+                onChange={(event) => setAccessCode(event.target.value)}
+                placeholder="PIN"
+                type="password"
+                inputMode="numeric"
+              />
               <button
-                disabled={busy || !name.trim()}
-                className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                disabled={busy || !name.trim() || accessCode.trim().length < 4}
+                className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f] sm:col-span-2"
               >
                 Adicionar
               </button>
@@ -486,9 +583,13 @@ export default function Home() {
                 <p className="p-5 text-[#5e6a63]">Adicione a primeira pessoa da família.</p>
               ) : (
                 data.participants.map((participant, index) => (
-                  <div
+                  <button
                     key={participant.id}
-                    className="grid grid-cols-[44px_1fr_auto] items-center gap-3 border-b border-[#e7ede9] p-4 last:border-b-0"
+                    type="button"
+                    onClick={() => setViewedParticipantId(participant.id)}
+                    className={`grid w-full grid-cols-[44px_1fr_auto] items-center gap-3 border-b border-[#e7ede9] p-4 text-left last:border-b-0 ${
+                      viewedParticipantId === participant.id ? "bg-[#e7f4ef]" : "bg-white"
+                    }`}
                   >
                     <span className="grid h-10 w-10 place-items-center rounded-full bg-[#f0c44c] font-black">
                       {index + 1}
@@ -500,11 +601,20 @@ export default function Home() {
                       </p>
                     </div>
                     <strong className="text-2xl">{participant.total}</strong>
-                  </div>
+                  </button>
                 ))
               )}
             </div>
           </div>
+
+          <ParticipantGuessesPanel
+            data={data}
+            viewedParticipant={viewedParticipant}
+            loggedParticipantId={selectedParticipantId}
+            onDeleteGuess={deleteGuess}
+            onDeleteAll={deleteViewedParticipantGuesses}
+            busy={busy}
+          />
 
           <form
             onSubmit={updateResult}
@@ -589,21 +699,62 @@ export default function Home() {
               </div>
             </div>
 
-            <label className="mt-4 block text-sm font-semibold">
-              Participante
-              <select
-                className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                value={selectedParticipantId ?? ""}
-                onChange={(event) => setSelectedParticipantId(Number(event.target.value))}
-              >
-                {data.participants.length === 0 && <option value="">Adicione um participante</option>}
-                {data.participants.map((participant) => (
-                  <option key={participant.id} value={participant.id}>
-                    {participant.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="mt-4 rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
+                <label className="text-sm font-semibold">
+                  Participante
+                  <select
+                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                    value={loginParticipantId ?? ""}
+                    onChange={(event) => setLoginParticipantId(Number(event.target.value))}
+                  >
+                    {data.participants.length === 0 && <option value="">Adicione um participante</option>}
+                    {data.participants.map((participant) => (
+                      <option key={participant.id} value={participant.id}>
+                        {participant.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold">
+                  PIN
+                  <input
+                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                    value={accessCode}
+                    onChange={(event) => setAccessCode(event.target.value)}
+                    type="password"
+                    inputMode="numeric"
+                    placeholder="4 dígitos"
+                  />
+                </label>
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={login}
+                    disabled={busy || !loginParticipantId || accessCode.trim().length < 4}
+                    className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                  >
+                    Entrar
+                  </button>
+                  {selectedParticipantId && (
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="min-h-12 rounded-md border border-[#b8c6bd] px-4 font-bold text-[#405047]"
+                    >
+                      Sair
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="mt-3 text-sm font-bold text-[#1d6b57]">
+                {selectedParticipant
+                  ? `Você está lançando como ${selectedParticipant.name}.`
+                  : loginParticipant?.hasLogin
+                    ? "Entre com o PIN dessa pessoa antes de salvar."
+                  : "Primeiro acesso: esse PIN será definido para essa pessoa."}
+              </p>
+            </div>
 
             <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f6f4] p-1">
               <button
@@ -900,6 +1051,107 @@ function GuessesPanel({
               );
             })
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ParticipantGuessesPanel({
+  data,
+  viewedParticipant,
+  loggedParticipantId,
+  onDeleteGuess,
+  onDeleteAll,
+  busy,
+}: {
+  data: BolaoData;
+  viewedParticipant: Participant | undefined;
+  loggedParticipantId: number | null;
+  onDeleteGuess: (guess: Guess) => void;
+  onDeleteAll: () => void;
+  busy: boolean;
+}) {
+  const participantGuesses = useMemo(() => {
+    if (!viewedParticipant) return [];
+
+    return data.guesses
+      .filter((guess) => guess.participantId === viewedParticipant.id)
+      .map((guess) => ({
+        guess,
+        match: data.matches.find((match) => match.id === guess.matchId),
+      }))
+      .filter((item): item is { guess: Guess; match: Match } => Boolean(item.match))
+      .sort((a, b) => new Date(a.match.matchDate).getTime() - new Date(b.match.matchDate).getTime());
+  }, [data.guesses, data.matches, viewedParticipant]);
+
+  if (!viewedParticipant) {
+    return (
+      <div className="rounded-lg border border-[#d7dfd9] bg-white p-5 text-[#5e6a63]">
+        Clique em um nome no ranking para ver os palpites.
+      </div>
+    );
+  }
+
+  const canDelete = loggedParticipantId === viewedParticipant.id;
+
+  return (
+    <div className="rounded-lg border border-[#d7dfd9] bg-white p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black">Palpites de {viewedParticipant.name}</h2>
+          <p className="mt-1 text-sm text-[#5e6a63]">
+            {viewedParticipant.exact} cravados · {viewedParticipant.total} pontos · {participantGuesses.length} palpites
+          </p>
+        </div>
+        {canDelete && participantGuesses.length > 0 && (
+          <button
+            type="button"
+            onClick={onDeleteAll}
+            disabled={busy}
+            className="min-h-10 rounded-md border border-[#c23d2f] px-3 text-sm font-bold text-[#c23d2f] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Apagar todos
+          </button>
+        )}
+      </div>
+
+      {participantGuesses.length === 0 ? (
+        <p className="mt-4 rounded-lg bg-[#edf1ee] p-4 text-sm font-bold text-[#5e6a63]">
+          Essa pessoa ainda não salvou palpites.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          {participantGuesses.map(({ guess, match }) => (
+            <div
+              key={guess.id}
+              className="rounded-lg border border-[#e7ede9] bg-[#f8faf8] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
+                  <p className="mt-1 font-black">
+                    {match.homeTeam} x {match.awayTeam}
+                  </p>
+                  <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
+                </div>
+                <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
+                  {guess.homeGuess} x {guess.awayGuess}
+                </strong>
+              </div>
+
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteGuess(guess)}
+                  disabled={busy}
+                  className="mt-3 min-h-10 rounded-md border border-[#c23d2f] px-3 text-sm font-bold text-[#c23d2f] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Apagar este palpite
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

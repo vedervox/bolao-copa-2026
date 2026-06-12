@@ -2,6 +2,7 @@ type ParticipantRow = {
   id: number;
   name: string;
   avatar: string;
+  access_code: string | null;
   created_at: string;
 };
 
@@ -216,8 +217,41 @@ function toParticipant(row: ParticipantRow) {
     id: row.id,
     name: row.name,
     avatar: row.avatar,
+    hasLogin: Boolean(row.access_code),
     createdAt: row.created_at,
   };
+}
+
+function normalizeAccessCode(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function verifyParticipantAccess(participantId: number, accessCode: string) {
+  const [participant] = await supabase<ParticipantRow[]>(
+    `participants?select=*&id=eq.${participantId}&limit=1`
+  );
+
+  if (!participant) return { ok: false, error: "Participante não encontrado." };
+
+  if (!participant.access_code) {
+    if (accessCode.length < 4) {
+      return { ok: false, error: "Crie um PIN com pelo menos 4 dígitos." };
+    }
+
+    await supabase<null>(`participants?id=eq.${participantId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ access_code: accessCode }),
+      prefer: "return=minimal",
+    });
+
+    return { ok: true, participant: { ...participant, access_code: accessCode } };
+  }
+
+  if (participant.access_code !== accessCode) {
+    return { ok: false, error: "PIN incorreto para esse participante." };
+  }
+
+  return { ok: true, participant };
 }
 
 function toMatch(row: MatchRow) {
@@ -376,11 +410,17 @@ export async function POST(request: Request) {
       awayGuess?: number;
       homeScore?: number | null;
       awayScore?: number | null;
+      guessId?: number;
+      accessCode?: string;
     };
 
     if (payload.action === "addParticipant") {
       const name = payload.name?.trim();
       if (!name) return Response.json({ error: "Informe um nome." }, { status: 400 });
+      const accessCode = normalizeAccessCode(payload.accessCode);
+      if (accessCode.length < 4) {
+        return Response.json({ error: "Crie um PIN com pelo menos 4 dígitos." }, { status: 400 });
+      }
 
       const exactMatches = await supabase<ParticipantRow[]>(`participants?select=*&name=eq.${encodeURIComponent(name)}&limit=1`);
       if (exactMatches[0]) return Response.json({ participant: toParticipant(exactMatches[0]) });
@@ -392,16 +432,34 @@ export async function POST(request: Request) {
         .join("");
       const [participant] = await supabase<ParticipantRow[]>("participants", {
         method: "POST",
-        body: JSON.stringify({ name, avatar }),
+        body: JSON.stringify({ name, avatar, access_code: accessCode }),
         prefer: "return=representation",
       });
       return Response.json({ participant: toParticipant(participant) }, { status: 201 });
+    }
+
+    if (payload.action === "loginParticipant") {
+      if (!payload.participantId) {
+        return Response.json({ error: "Escolha participante." }, { status: 400 });
+      }
+
+      const accessCode = normalizeAccessCode(payload.accessCode);
+      const access = await verifyParticipantAccess(payload.participantId, accessCode);
+      if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
+
+      return Response.json({ participant: toParticipant(access.participant) });
     }
 
     if (payload.action === "saveGuess") {
       if (!payload.participantId || !payload.matchId) {
         return Response.json({ error: "Escolha participante e jogo." }, { status: 400 });
       }
+
+      const access = await verifyParticipantAccess(
+        payload.participantId,
+        normalizeAccessCode(payload.accessCode)
+      );
+      if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
 
       const homeGuess = payload.homeGuess;
       const awayGuess = payload.awayGuess;
@@ -449,6 +507,44 @@ export async function POST(request: Request) {
           away_guess: awayGuess,
         }),
         prefer: "return=representation",
+      });
+
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "deleteGuess") {
+      if (!payload.participantId || !payload.guessId) {
+        return Response.json({ error: "Escolha participante e palpite." }, { status: 400 });
+      }
+
+      const access = await verifyParticipantAccess(
+        payload.participantId,
+        normalizeAccessCode(payload.accessCode)
+      );
+      if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
+
+      await supabase<null>(
+        `guesses?id=eq.${payload.guessId}&participant_id=eq.${payload.participantId}`,
+        { method: "DELETE", prefer: "return=minimal" }
+      );
+
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "deleteParticipantGuesses") {
+      if (!payload.participantId) {
+        return Response.json({ error: "Escolha participante." }, { status: 400 });
+      }
+
+      const access = await verifyParticipantAccess(
+        payload.participantId,
+        normalizeAccessCode(payload.accessCode)
+      );
+      if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
+
+      await supabase<null>(`guesses?participant_id=eq.${payload.participantId}`, {
+        method: "DELETE",
+        prefer: "return=minimal",
       });
 
       return Response.json({ ok: true });
