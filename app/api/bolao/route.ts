@@ -461,13 +461,12 @@ export async function POST(request: Request) {
       );
       if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
 
-      const homeGuess = payload.homeGuess;
-      const awayGuess = payload.awayGuess;
+      const { homeGuess, awayGuess } = payload;
       if (
-        !Number.isInteger(homeGuess) ||
-        !Number.isInteger(awayGuess) ||
         homeGuess === undefined ||
         awayGuess === undefined ||
+        !Number.isInteger(homeGuess) ||
+        !Number.isInteger(awayGuess) ||
         homeGuess < 0 ||
         awayGuess < 0 ||
         homeGuess > 20 ||
@@ -568,15 +567,12 @@ export async function POST(request: Request) {
         );
       }
 
-      const homeScore = payload.homeScore;
-      const awayScore = payload.awayScore;
+      const { homeScore, awayScore } = payload;
       const hasResult =
+        typeof homeScore === "number" &&
+        typeof awayScore === "number" &&
         Number.isInteger(homeScore) &&
         Number.isInteger(awayScore) &&
-        homeScore !== null &&
-        awayScore !== null &&
-        homeScore !== undefined &&
-        awayScore !== undefined &&
         homeScore >= 0 &&
         awayScore >= 0;
 
