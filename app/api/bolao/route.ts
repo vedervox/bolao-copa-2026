@@ -281,14 +281,12 @@ function toGuess(row: GuessRow) {
 
 function scoreGuess(guess: GuessRow, match: MatchRow) {
   if (match.home_score === null || match.away_score === null) return 0;
-  if (guess.home_guess === match.home_score && guess.away_guess === match.away_score) return 5;
+  if (guess.home_guess === match.home_score && guess.away_guess === match.away_score) return 3;
 
   const actualDirection = Math.sign(match.home_score - match.away_score);
   const guessedDirection = Math.sign(guess.home_guess - guess.away_guess);
-  const actualDiff = match.home_score - match.away_score;
-  const guessedDiff = guess.home_guess - guess.away_guess;
 
-  if (actualDirection === guessedDirection) return actualDiff === guessedDiff ? 4 : 3;
+  if (actualDirection === guessedDirection) return 1;
   return 0;
 }
 
@@ -380,7 +378,7 @@ export async function GET() {
         }, 0);
         const exact = participantGuesses.filter((guess) => {
           const match = matchRows.find((item) => item.id === guess.match_id);
-          return match && scoreGuess(guess, match) === 5;
+          return match && scoreGuess(guess, match) === 3;
         }).length;
 
         return { ...toParticipant(participant), total, exact, guesses: participantGuesses.length };

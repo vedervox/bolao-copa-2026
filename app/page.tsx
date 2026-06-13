@@ -691,7 +691,7 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-black">Fazer palpites</h2>
                 <p className="mt-1 text-sm text-[#5e6a63]">
-                  Cada pessoa só pode salvar uma vez por jogo. Depois de salvo, bloqueia.
+                  Placar exato vale 3 pontos. Acertar vencedor ou empate vale 1 ponto.
                 </p>
               </div>
               <div className="rounded-lg bg-[#e7f4ef] px-4 py-3 text-sm font-bold text-[#1d6b57]">
