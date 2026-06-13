@@ -15,6 +15,7 @@ type MatchRow = {
   status: "open" | "locked" | "finished";
   home_score: number | null;
   away_score: number | null;
+  qualified_team: string | null;
   created_at: string;
 };
 
@@ -24,8 +25,25 @@ type GuessRow = {
   match_id: number;
   home_guess: number;
   away_guess: number;
+  qualified_team_guess: string | null;
   updated_at: string;
 };
+
+type BonusPredictionRow = {
+  participant_id: number;
+  champion_guess: string | null;
+  top_scorer_guess: string | null;
+  updated_at: string;
+};
+
+type PoolSettingRow = {
+  key: string;
+  value: string | null;
+  updated_at: string;
+};
+
+const GUESS_DEADLINE_MINUTES = 30;
+const FIRST_BRAZIL_MATCH_DATE = new Date("2026-06-13T22:00:00.000Z");
 
 type InitialMatch = readonly [string, string, string, string];
 
@@ -183,9 +201,13 @@ function hasMatchStarted(match: MatchRow) {
   return new Date() >= new Date(match.match_date);
 }
 
+function hasGuessDeadlinePassed(match: MatchRow) {
+  return Date.now() >= new Date(match.match_date).getTime() - GUESS_DEADLINE_MINUTES * 60 * 1000;
+}
+
 function getComputedStatus(match: MatchRow): "open" | "locked" | "finished" {
   if (hasOfficialResult(match) && hasMatchStarted(match)) return "finished";
-  if (hasMatchStarted(match)) return "locked";
+  if (hasGuessDeadlinePassed(match)) return "locked";
   return "open";
 }
 
@@ -212,6 +234,14 @@ function hasDefinedTeams(match: MatchRow) {
   return isDefinedTeam(match.home_team) && isDefinedTeam(match.away_team);
 }
 
+function isKnockoutMatch(match: Pick<MatchRow, "group_name">) {
+  return !normalizeTeamName(match.group_name).startsWith("grupo ");
+}
+
+function normalizePick(value: string | null | undefined) {
+  return normalizeTeamName(value ?? "");
+}
+
 function toParticipant(row: ParticipantRow) {
   return {
     id: row.id,
@@ -226,7 +256,14 @@ function normalizeAccessCode(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-async function verifyParticipantAccess(participantId: number, accessCode: string) {
+type ParticipantAccess =
+  | { ok: true; participant: ParticipantRow }
+  | { ok: false; error: string };
+
+async function verifyParticipantAccess(
+  participantId: number,
+  accessCode: string
+): Promise<ParticipantAccess> {
   const [participant] = await supabase<ParticipantRow[]>(
     `participants?select=*&id=eq.${participantId}&limit=1`
   );
@@ -264,6 +301,7 @@ function toMatch(row: MatchRow) {
     status: getComputedStatus(row),
     homeScore: row.home_score,
     awayScore: row.away_score,
+    qualifiedTeam: row.qualified_team,
     createdAt: row.created_at,
   };
 }
@@ -275,19 +313,67 @@ function toGuess(row: GuessRow) {
     matchId: row.match_id,
     homeGuess: row.home_guess,
     awayGuess: row.away_guess,
+    qualifiedTeamGuess: row.qualified_team_guess,
     updatedAt: row.updated_at,
   };
 }
 
 function scoreGuess(guess: GuessRow, match: MatchRow) {
-  if (match.home_score === null || match.away_score === null) return 0;
-  if (guess.home_guess === match.home_score && guess.away_guess === match.away_score) return 3;
+  if (match.home_score === null || match.away_score === null) {
+    return { points: 0, exact: false, trend: false };
+  }
+
+  const exact = guess.home_guess === match.home_score && guess.away_guess === match.away_score;
+  if (exact) return { points: 10, exact: true, trend: true };
 
   const actualDirection = Math.sign(match.home_score - match.away_score);
   const guessedDirection = Math.sign(guess.home_guess - guess.away_guess);
+  const trend = actualDirection === guessedDirection;
 
-  if (actualDirection === guessedDirection) return 1;
-  return 0;
+  if (!trend) return { points: 0, exact: false, trend: false };
+
+  const actualDiff = match.home_score - match.away_score;
+  const guessedDiff = guess.home_guess - guess.away_guess;
+  const actualWinnerGoals =
+    actualDirection > 0 ? match.home_score : actualDirection < 0 ? match.away_score : null;
+  const guessedWinnerGoals =
+    actualDirection > 0 ? guess.home_guess : actualDirection < 0 ? guess.away_guess : null;
+
+  if (actualWinnerGoals !== null && guessedWinnerGoals === actualWinnerGoals) {
+    return { points: 5, exact: false, trend: true };
+  }
+
+  if (actualDiff === guessedDiff) {
+    return { points: 3, exact: false, trend: true };
+  }
+
+  return { points: 2, exact: false, trend: true };
+}
+
+function scoreQualificationBonus(guess: GuessRow, match: MatchRow) {
+  if (!isKnockoutMatch(match) || !match.qualified_team || !guess.qualified_team_guess) return 0;
+  return normalizePick(match.qualified_team) === normalizePick(guess.qualified_team_guess) ? 2 : 0;
+}
+
+function settingValue(settings: PoolSettingRow[], key: string) {
+  return settings.find((setting) => setting.key === key)?.value ?? "";
+}
+
+function scoreBonusPrediction(prediction: BonusPredictionRow | undefined, settings: PoolSettingRow[]) {
+  const champion = settingValue(settings, "champion");
+  const topScorer = settingValue(settings, "top_scorer");
+  const championCorrect = Boolean(
+    champion && prediction?.champion_guess && normalizePick(prediction.champion_guess) === normalizePick(champion)
+  );
+  const topScorerCorrect = Boolean(
+    topScorer && prediction?.top_scorer_guess && normalizePick(prediction.top_scorer_guess) === normalizePick(topScorer)
+  );
+
+  return {
+    points: (championCorrect ? 20 : 0) + (topScorerCorrect ? 15 : 0),
+    championCorrect,
+    topScorerCorrect,
+  };
 }
 
 function matchKey(match: Pick<MatchRow, "home_team" | "away_team" | "match_date">) {
@@ -363,32 +449,65 @@ async function insertAllMatches() {
 export async function GET() {
   try {
     await ensureSeeded();
-    const [participantRows, matchRows, guessRows] = await Promise.all([
+    const [participantRows, matchRows, guessRows, bonusRows, settingRows] = await Promise.all([
       supabase<ParticipantRow[]>("participants?select=*&order=created_at.asc,id.asc"),
       supabase<MatchRow[]>("matches?select=*&order=match_date.asc,id.asc"),
       supabase<GuessRow[]>("guesses?select=*&order=updated_at.asc,id.asc"),
+      supabase<BonusPredictionRow[]>("bonus_predictions?select=*"),
+      supabase<PoolSettingRow[]>("pool_settings?select=*"),
     ]);
 
     const ranked = participantRows
       .map((participant) => {
         const participantGuesses = guessRows.filter((guess) => guess.participant_id === participant.id);
-        const total = participantGuesses.reduce((sum, guess) => {
+        const matchPoints = participantGuesses.reduce((sum, guess) => {
           const match = matchRows.find((item) => item.id === guess.match_id);
-          return sum + (match ? scoreGuess(guess, match) : 0);
+          return sum + (match ? scoreGuess(guess, match).points + scoreQualificationBonus(guess, match) : 0);
         }, 0);
         const exact = participantGuesses.filter((guess) => {
           const match = matchRows.find((item) => item.id === guess.match_id);
-          return match && scoreGuess(guess, match) === 3;
+          return match && scoreGuess(guess, match).exact;
         }).length;
+        const trend = participantGuesses.filter((guess) => {
+          const match = matchRows.find((item) => item.id === guess.match_id);
+          return match && scoreGuess(guess, match).trend;
+        }).length;
+        const bonus = scoreBonusPrediction(
+          bonusRows.find((row) => row.participant_id === participant.id),
+          settingRows
+        );
 
-        return { ...toParticipant(participant), total, exact, guesses: participantGuesses.length };
+        return {
+          ...toParticipant(participant),
+          total: matchPoints + bonus.points,
+          exact,
+          trend,
+          championCorrect: bonus.championCorrect,
+          guesses: participantGuesses.length,
+        };
       })
-      .sort((a, b) => b.total - a.total || b.exact - a.exact || a.name.localeCompare(b.name));
+      .sort(
+        (a, b) =>
+          b.total - a.total ||
+          b.exact - a.exact ||
+          b.trend - a.trend ||
+          Number(b.championCorrect) - Number(a.championCorrect) ||
+          a.name.localeCompare(b.name)
+      );
 
     return Response.json({
       participants: ranked,
       matches: matchRows.map(toMatch),
       guesses: guessRows.map(toGuess),
+      bonusPredictions: bonusRows.map((row) => ({
+        participantId: row.participant_id,
+        championGuess: row.champion_guess,
+        topScorerGuess: row.top_scorer_guess,
+      })),
+      poolSettings: {
+        champion: settingValue(settingRows, "champion"),
+        topScorer: settingValue(settingRows, "top_scorer"),
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado";
@@ -410,6 +529,12 @@ export async function POST(request: Request) {
       awayScore?: number | null;
       guessId?: number;
       accessCode?: string;
+      qualifiedTeamGuess?: string;
+      qualifiedTeam?: string | null;
+      championGuess?: string;
+      topScorerGuess?: string;
+      champion?: string | null;
+      topScorer?: string | null;
     };
 
     if (payload.action === "addParticipant") {
@@ -482,7 +607,20 @@ export async function POST(request: Request) {
         );
       }
       if (getComputedStatus(match) !== "open") {
-        return Response.json({ error: "Esse jogo já está bloqueado para palpites." }, { status: 409 });
+        return Response.json(
+          { error: `Esse jogo já está bloqueado. Palpites fecham ${GUESS_DEADLINE_MINUTES} minutos antes.` },
+          { status: 409 }
+        );
+      }
+
+      const qualifiedTeamGuess = normalizeAccessCode(payload.qualifiedTeamGuess);
+      if (
+        isKnockoutMatch(match) &&
+        qualifiedTeamGuess &&
+        normalizePick(qualifiedTeamGuess) !== normalizePick(match.home_team) &&
+        normalizePick(qualifiedTeamGuess) !== normalizePick(match.away_team)
+      ) {
+        return Response.json({ error: "Escolha uma seleção classificada válida." }, { status: 400 });
       }
 
       const existingGuess = await supabase<GuessRow[]>(
@@ -502,6 +640,7 @@ export async function POST(request: Request) {
           match_id: payload.matchId,
           home_guess: homeGuess,
           away_guess: awayGuess,
+          qualified_team_guess: qualifiedTeamGuess || null,
         }),
         prefer: "return=representation",
       });
@@ -566,6 +705,7 @@ export async function POST(request: Request) {
       }
 
       const { homeScore, awayScore } = payload;
+      const qualifiedTeam = normalizeAccessCode(payload.qualifiedTeam);
       const hasResult =
         typeof homeScore === "number" &&
         typeof awayScore === "number" &&
@@ -579,6 +719,7 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           home_score: hasResult ? homeScore : null,
           away_score: hasResult ? awayScore : null,
+          qualified_team: qualifiedTeam || null,
           status: hasResult ? "finished" : "open",
         }),
         prefer: "return=minimal",
@@ -595,6 +736,7 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           home_score: null,
           away_score: null,
+          qualified_team: null,
           status: "open",
         }),
         prefer: "return=minimal",
@@ -606,6 +748,59 @@ export async function POST(request: Request) {
     if (payload.action === "deleteParticipant") {
       if (!payload.participantId) return Response.json({ error: "Escolha participante." }, { status: 400 });
       await supabase<null>(`participants?id=eq.${payload.participantId}`, { method: "DELETE", prefer: "return=minimal" });
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "saveBonusPrediction") {
+      if (!payload.participantId) {
+        return Response.json({ error: "Escolha participante." }, { status: 400 });
+      }
+
+      if (Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()) {
+        return Response.json(
+          { error: "Previsões extras fecharam antes do primeiro jogo do Brasil." },
+          { status: 409 }
+        );
+      }
+
+      const access = await verifyParticipantAccess(
+        payload.participantId,
+        normalizeAccessCode(payload.accessCode)
+      );
+      if (!access.ok) return Response.json({ error: access.error }, { status: 401 });
+
+      await supabase<BonusPredictionRow[]>("bonus_predictions?on_conflict=participant_id", {
+        method: "POST",
+        body: JSON.stringify({
+          participant_id: payload.participantId,
+          champion_guess: normalizeAccessCode(payload.championGuess) || null,
+          top_scorer_guess: normalizeAccessCode(payload.topScorerGuess) || null,
+          updated_at: new Date().toISOString(),
+        }),
+        prefer: "resolution=merge-duplicates,return=representation",
+      });
+
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "updateBonusResults") {
+      await supabase<PoolSettingRow[]>("pool_settings?on_conflict=key", {
+        method: "POST",
+        body: JSON.stringify([
+          {
+            key: "champion",
+            value: normalizeAccessCode(payload.champion) || null,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            key: "top_scorer",
+            value: normalizeAccessCode(payload.topScorer) || null,
+            updated_at: new Date().toISOString(),
+          },
+        ]),
+        prefer: "resolution=merge-duplicates,return=representation",
+      });
+
       return Response.json({ ok: true });
     }
 

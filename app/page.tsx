@@ -10,6 +10,8 @@ type Participant = {
   hasLogin: boolean;
   total: number;
   exact: number;
+  trend: number;
+  championCorrect: boolean;
   guesses: number;
 };
 
@@ -22,6 +24,7 @@ type Match = {
   status: "open" | "locked" | "finished";
   homeScore: number | null;
   awayScore: number | null;
+  qualifiedTeam: string | null;
 };
 
 type Guess = {
@@ -30,17 +33,32 @@ type Guess = {
   matchId: number;
   homeGuess: number;
   awayGuess: number;
+  qualifiedTeamGuess: string | null;
+};
+
+type BonusPrediction = {
+  participantId: number;
+  championGuess: string | null;
+  topScorerGuess: string | null;
+};
+
+type PoolSettings = {
+  champion: string;
+  topScorer: string;
 };
 
 type BolaoData = {
   participants: Participant[];
   matches: Match[];
   guesses: Guess[];
+  bonusPredictions: BonusPrediction[];
+  poolSettings: PoolSettings;
 };
 
 type GuessDraft = {
   homeGuess: number;
   awayGuess: number;
+  qualifiedTeamGuess: string;
 };
 
 type GuessTab = "brasil" | "todos";
@@ -49,7 +67,15 @@ const emptyData: BolaoData = {
   participants: [],
   matches: [],
   guesses: [],
+  bonusPredictions: [],
+  poolSettings: {
+    champion: "",
+    topScorer: "",
+  },
 };
+
+const GUESS_DEADLINE_MINUTES = 30;
+const FIRST_BRAZIL_MATCH_DATE = new Date("2026-06-13T22:00:00.000Z");
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR", {
@@ -97,9 +123,13 @@ function hasMatchStarted(match: Match) {
   return new Date() >= new Date(match.matchDate);
 }
 
+function hasGuessDeadlinePassed(match: Match) {
+  return Date.now() >= new Date(match.matchDate).getTime() - GUESS_DEADLINE_MINUTES * 60 * 1000;
+}
+
 function getMatchStatus(match: Match): Match["status"] {
   if (hasOfficialResult(match) && hasMatchStarted(match)) return "finished";
-  if (hasMatchStarted(match)) return "locked";
+  if (hasGuessDeadlinePassed(match)) return "locked";
   return "open";
 }
 
@@ -116,6 +146,10 @@ function isDefinedTeam(team: string) {
 
 function hasDefinedTeams(match: Match) {
   return isDefinedTeam(match.homeTeam) && isDefinedTeam(match.awayTeam);
+}
+
+function isKnockoutMatch(match: Match) {
+  return !normalizeTeamName(match.groupName).startsWith("grupo ");
 }
 
 function statusLabel(match: Match) {
@@ -143,6 +177,11 @@ export default function Home() {
   const [viewedParticipantId, setViewedParticipantId] = useState<number | null>(null);
   const [homeScore, setHomeScore] = useState(0);
   const [awayScore, setAwayScore] = useState(0);
+  const [qualifiedTeam, setQualifiedTeam] = useState("");
+  const [championGuess, setChampionGuess] = useState("");
+  const [topScorerGuess, setTopScorerGuess] = useState("");
+  const [championResult, setChampionResult] = useState("");
+  const [topScorerResult, setTopScorerResult] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Carregando bolão...");
   const [activeTab, setActiveTab] = useState<GuessTab>("brasil");
@@ -182,9 +221,11 @@ export default function Home() {
     ) {
       setHomeScore(selectedMatch.homeScore);
       setAwayScore(selectedMatch.awayScore);
+      setQualifiedTeam(selectedMatch.qualifiedTeam ?? "");
     } else {
       setHomeScore(0);
       setAwayScore(0);
+      setQualifiedTeam("");
     }
   }, [selectedMatch]);
 
@@ -201,6 +242,7 @@ export default function Home() {
       nextDrafts[match.id] = {
         homeGuess: existingGuess?.homeGuess ?? 0,
         awayGuess: existingGuess?.awayGuess ?? 0,
+        qualifiedTeamGuess: existingGuess?.qualifiedTeamGuess ?? "",
       };
     });
 
@@ -223,6 +265,21 @@ export default function Home() {
     () => data.participants.find((participant) => participant.id === viewedParticipantId),
     [data.participants, viewedParticipantId]
   );
+
+  const selectedBonusPrediction = useMemo(
+    () => data.bonusPredictions.find((prediction) => prediction.participantId === selectedParticipantId),
+    [data.bonusPredictions, selectedParticipantId]
+  );
+
+  useEffect(() => {
+    setChampionGuess(selectedBonusPrediction?.championGuess ?? "");
+    setTopScorerGuess(selectedBonusPrediction?.topScorerGuess ?? "");
+  }, [selectedBonusPrediction]);
+
+  useEffect(() => {
+    setChampionResult(data.poolSettings.champion);
+    setTopScorerResult(data.poolSettings.topScorer);
+  }, [data.poolSettings.champion, data.poolSettings.topScorer]);
 
   const brazilMatches = useMemo(
     () => data.matches.filter(isBrazilMatch),
@@ -398,6 +455,7 @@ export default function Home() {
         matchId: selectedMatch?.id,
         homeScore,
         awayScore,
+        qualifiedTeam,
       },
       "Resultado atualizado e ranking recalculado."
     );
@@ -415,13 +473,25 @@ export default function Home() {
     );
   }
 
-  function updateDraft(matchId: number, field: keyof GuessDraft, value: number) {
+  function updateDraft(matchId: number, field: "homeGuess" | "awayGuess", value: number) {
     setDrafts((current) => ({
       ...current,
       [matchId]: {
         homeGuess: current[matchId]?.homeGuess ?? 0,
         awayGuess: current[matchId]?.awayGuess ?? 0,
+        qualifiedTeamGuess: current[matchId]?.qualifiedTeamGuess ?? "",
         [field]: Number.isFinite(value) ? value : 0,
+      },
+    }));
+  }
+
+  function updateQualifiedDraft(matchId: number, value: string) {
+    setDrafts((current) => ({
+      ...current,
+      [matchId]: {
+        homeGuess: current[matchId]?.homeGuess ?? 0,
+        awayGuess: current[matchId]?.awayGuess ?? 0,
+        qualifiedTeamGuess: value,
       },
     }));
   }
@@ -449,13 +519,14 @@ export default function Home() {
 
     try {
       for (const match of matchesToSave) {
-        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
+        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0, qualifiedTeamGuess: "" };
         await post({
           action: "saveGuess",
           participantId: selectedParticipantId,
           matchId: match.id,
           homeGuess: draft.homeGuess,
           awayGuess: draft.awayGuess,
+          qualifiedTeamGuess: draft.qualifiedTeamGuess,
           accessCode,
         });
       }
@@ -509,6 +580,39 @@ export default function Home() {
         accessCode,
       },
       "Todos os palpites desse participante foram apagados."
+    );
+  }
+
+  function saveBonusPrediction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedParticipantId) {
+      setMessage("Entre como participante antes de salvar os bônus.");
+      return;
+    }
+
+    send(
+      {
+        action: "saveBonusPrediction",
+        participantId: selectedParticipantId,
+        accessCode,
+        championGuess,
+        topScorerGuess,
+      },
+      "Previsões extras salvas."
+    );
+  }
+
+  function updateBonusResults(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    send(
+      {
+        action: "updateBonusResults",
+        champion: championResult,
+        topScorer: topScorerResult,
+      },
+      "Resultados extras atualizados."
     );
   }
 
@@ -597,7 +701,7 @@ export default function Home() {
                     <div className="min-w-0">
                       <p className="truncate font-bold">{participant.name}</p>
                       <p className="text-sm text-[#5e6a63]">
-                        {participant.exact} cravados · {participant.guesses} palpites
+                        {participant.exact} exatos · {participant.trend} tendências · {participant.guesses} palpites
                       </p>
                     </div>
                     <strong className="text-2xl">{participant.total}</strong>
@@ -615,6 +719,43 @@ export default function Home() {
             onDeleteAll={deleteViewedParticipantGuesses}
             busy={busy}
           />
+
+          <form
+            onSubmit={saveBonusPrediction}
+            className="rounded-lg border border-[#d7dfd9] bg-white p-5"
+          >
+            <h2 className="text-xl font-black">Previsões extras</h2>
+            <p className="mt-1 text-sm text-[#5e6a63]">
+              Campeão vale 20 pontos. Artilheiro vale 15 pontos.
+            </p>
+            <div className="mt-4 grid gap-3">
+              <input
+                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                value={championGuess}
+                onChange={(event) => setChampionGuess(event.target.value)}
+                placeholder="Campeão da Copa"
+                disabled={Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()}
+              />
+              <input
+                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                value={topScorerGuess}
+                onChange={(event) => setTopScorerGuess(event.target.value)}
+                placeholder="Artilheiro"
+                disabled={Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()}
+              />
+            </div>
+            <button
+              disabled={
+                busy ||
+                !selectedParticipantId ||
+                accessCode.trim().length < 4 ||
+                Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()
+              }
+              className="mt-4 min-h-12 w-full rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+            >
+              Salvar previsões extras
+            </button>
+          </form>
 
           <form
             onSubmit={updateResult}
@@ -646,6 +787,20 @@ export default function Home() {
               <ScoreInput label="Casa" value={homeScore} onChange={setHomeScore} />
               <ScoreInput label="Fora" value={awayScore} onChange={setAwayScore} />
             </div>
+            {selectedMatch && isKnockoutMatch(selectedMatch) && hasDefinedTeams(selectedMatch) && (
+              <label className="mt-3 block text-sm font-semibold">
+                Classificado
+                <select
+                  className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                  value={qualifiedTeam}
+                  onChange={(event) => setQualifiedTeam(event.target.value)}
+                >
+                  <option value="">Sem classificado</option>
+                  <option value={selectedMatch.homeTeam}>{selectedMatch.homeTeam}</option>
+                  <option value={selectedMatch.awayTeam}>{selectedMatch.awayTeam}</option>
+                </select>
+              </label>
+            )}
             {selectedMatch && !hasMatchStarted(selectedMatch) && (
               <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
                 Esse jogo ainda não aconteceu. Resultado oficial só depois da partida.
@@ -680,6 +835,33 @@ export default function Home() {
               </button>
             )}
           </form>
+
+          <form
+            onSubmit={updateBonusResults}
+            className="rounded-lg border border-[#d7dfd9] bg-white p-5"
+          >
+            <h2 className="text-xl font-black">Resultado das previsões extras</h2>
+            <div className="mt-4 grid gap-3">
+              <input
+                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                value={championResult}
+                onChange={(event) => setChampionResult(event.target.value)}
+                placeholder="Campeão oficial"
+              />
+              <input
+                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                value={topScorerResult}
+                onChange={(event) => setTopScorerResult(event.target.value)}
+                placeholder="Artilheiro oficial"
+              />
+            </div>
+            <button
+              disabled={busy}
+              className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+            >
+              Atualizar bônus oficiais
+            </button>
+          </form>
         </div>
 
         <div className="space-y-6">
@@ -691,7 +873,7 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-black">Fazer palpites</h2>
                 <p className="mt-1 text-sm text-[#5e6a63]">
-                  Placar exato vale 3 pontos. Acertar vencedor ou empate vale 1 ponto.
+                  Exato 10 · vencedor + gols do ganhador 5 · saldo 3 · tendência 2.
                 </p>
               </div>
               <div className="rounded-lg bg-[#e7f4ef] px-4 py-3 text-sm font-bold text-[#1d6b57]">
@@ -839,7 +1021,7 @@ export default function Home() {
 
                     <div className="grid gap-3">
                       {day.matches.map((match) => {
-                        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0 };
+                        const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0, qualifiedTeamGuess: "" };
                         const existingGuess = findGuess(data.guesses, selectedParticipantId, match.id);
                         const alreadyGuessed = Boolean(existingGuess);
                         const teamsDefined = hasDefinedTeams(match);
@@ -892,6 +1074,22 @@ export default function Home() {
                               <strong className="truncate">{match.awayTeam}</strong>
                             </div>
 
+                            {isKnockoutMatch(match) && teamsDefined && (
+                              <label className="mt-3 block text-sm font-semibold">
+                                Quem classifica? +2 pontos
+                                <select
+                                  className="mt-2 min-h-11 w-full rounded-md border border-[#b8c6bd] px-3"
+                                  value={draft.qualifiedTeamGuess}
+                                  disabled={locked}
+                                  onChange={(event) => updateQualifiedDraft(match.id, event.target.value)}
+                                >
+                                  <option value="">Escolha no mata-mata</option>
+                                  <option value={match.homeTeam}>{match.homeTeam}</option>
+                                  <option value={match.awayTeam}>{match.awayTeam}</option>
+                                </select>
+                              </label>
+                            )}
+
                             {!teamsDefined && (
                               <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
                                 Placar bloqueado até os dois times estarem definidos.
@@ -906,7 +1104,7 @@ export default function Home() {
 
                             {getMatchStatus(match) === "locked" && !alreadyGuessed && teamsDefined && (
                               <p className="mt-3 rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
-                                Jogo bloqueado porque o horário já chegou.
+                                Jogo bloqueado porque faltam menos de {GUESS_DEADLINE_MINUTES} minutos.
                               </p>
                             )}
                           </div>
@@ -1035,13 +1233,20 @@ function GuessesPanel({
                   <div className="min-w-0">
                     <p className="truncate font-bold">{participant.name}</p>
                     <p className="text-sm text-[#5e6a63]">
-                      {participant.exact} cravados · {participant.total} pontos
+                      {participant.exact} exatos · {participant.trend} tendências · {participant.total} pontos
                     </p>
                   </div>
                   {guess ? (
-                    <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
-                      {guess.homeGuess} x {guess.awayGuess}
-                    </strong>
+                    <div className="text-right">
+                      <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
+                        {guess.homeGuess} x {guess.awayGuess}
+                      </strong>
+                      {guess.qualifiedTeamGuess && (
+                        <p className="mt-2 text-xs font-bold text-[#1d6b57]">
+                          Classifica: {guess.qualifiedTeamGuess}
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <span className="rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#5e6a63]">
                       Sem palpite
@@ -1101,7 +1306,7 @@ function ParticipantGuessesPanel({
         <div>
           <h2 className="text-xl font-black">Palpites de {viewedParticipant.name}</h2>
           <p className="mt-1 text-sm text-[#5e6a63]">
-            {viewedParticipant.exact} cravados · {viewedParticipant.total} pontos · {participantGuesses.length} palpites
+            {viewedParticipant.exact} exatos · {viewedParticipant.trend} tendências · {viewedParticipant.total} pontos · {participantGuesses.length} palpites
           </p>
         </div>
         {canDelete && participantGuesses.length > 0 && (
@@ -1139,6 +1344,11 @@ function ParticipantGuessesPanel({
                   {guess.homeGuess} x {guess.awayGuess}
                 </strong>
               </div>
+              {guess.qualifiedTeamGuess && (
+                <p className="mt-3 rounded-md bg-[#e7f4ef] px-3 py-2 text-sm font-bold text-[#1d6b57]">
+                  Classifica: {guess.qualifiedTeamGuess}
+                </p>
+              )}
 
               {canDelete && (
                 <button

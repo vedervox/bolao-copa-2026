@@ -18,6 +18,7 @@ create table if not exists matches (
   status text not null default 'open' check (status in ('open', 'locked', 'finished')),
   home_score integer,
   away_score integer,
+  qualified_team text,
   created_at timestamptz not null default now()
 );
 
@@ -27,10 +28,27 @@ create table if not exists guesses (
   match_id bigint not null references matches(id) on delete cascade,
   home_guess integer not null check (home_guess >= 0),
   away_guess integer not null check (away_guess >= 0),
+  qualified_team_guess text,
   updated_at timestamptz not null default now(),
   unique (participant_id, match_id)
+);
+
+create table if not exists bonus_predictions (
+  participant_id bigint primary key references participants(id) on delete cascade,
+  champion_guess text,
+  top_scorer_guess text,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists pool_settings (
+  key text primary key,
+  value text,
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists matches_match_date_idx on matches (match_date);
 create index if not exists guesses_participant_id_idx on guesses (participant_id);
 create index if not exists guesses_match_id_idx on guesses (match_id);
+
+alter table matches add column if not exists qualified_team text;
+alter table guesses add column if not exists qualified_team_guess text;
