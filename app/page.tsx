@@ -45,6 +45,7 @@ type BonusPrediction = {
 type PoolSettings = {
   champion: string;
   topScorer: string;
+  bonusFinalized: boolean;
 };
 
 type BolaoData = {
@@ -71,6 +72,7 @@ const emptyData: BolaoData = {
   poolSettings: {
     champion: "",
     topScorer: "",
+    bonusFinalized: false,
   },
 };
 
@@ -182,6 +184,7 @@ export default function Home() {
   const [topScorerGuess, setTopScorerGuess] = useState("");
   const [championResult, setChampionResult] = useState("");
   const [topScorerResult, setTopScorerResult] = useState("");
+  const [bonusFinalized, setBonusFinalized] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Carregando bolão...");
   const [activeTab, setActiveTab] = useState<GuessTab>("brasil");
@@ -279,7 +282,8 @@ export default function Home() {
   useEffect(() => {
     setChampionResult(data.poolSettings.champion);
     setTopScorerResult(data.poolSettings.topScorer);
-  }, [data.poolSettings.champion, data.poolSettings.topScorer]);
+    setBonusFinalized(data.poolSettings.bonusFinalized);
+  }, [data.poolSettings.bonusFinalized, data.poolSettings.champion, data.poolSettings.topScorer]);
 
   const brazilMatches = useMemo(
     () => data.matches.filter(isBrazilMatch),
@@ -611,6 +615,7 @@ export default function Home() {
         action: "updateBonusResults",
         champion: championResult,
         topScorer: topScorerResult,
+        bonusFinalized,
       },
       "Resultados extras atualizados."
     );
@@ -841,6 +846,9 @@ export default function Home() {
             className="rounded-lg border border-[#d7dfd9] bg-white p-5"
           >
             <h2 className="text-xl font-black">Resultado das previsões extras</h2>
+            <p className="mt-1 text-sm text-[#5e6a63]">
+              Só marque a pontuação dos bônus depois da Copa terminar.
+            </p>
             <div className="mt-4 grid gap-3">
               <input
                 className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
@@ -854,6 +862,15 @@ export default function Home() {
                 onChange={(event) => setTopScorerResult(event.target.value)}
                 placeholder="Artilheiro oficial"
               />
+              <label className="flex items-start gap-3 rounded-md border border-[#d7dfd9] bg-[#f8faf8] p-3 text-sm font-bold">
+                <input
+                  type="checkbox"
+                  checked={bonusFinalized}
+                  onChange={(event) => setBonusFinalized(event.target.checked)}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>Liberar pontuação dos bônus de campeão e artilheiro</span>
+              </label>
             </div>
             <button
               disabled={busy}

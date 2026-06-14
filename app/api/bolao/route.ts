@@ -360,6 +360,11 @@ function settingValue(settings: PoolSettingRow[], key: string) {
 }
 
 function scoreBonusPrediction(prediction: BonusPredictionRow | undefined, settings: PoolSettingRow[]) {
+  const bonusFinalized = settingValue(settings, "bonus_finalized") === "true";
+  if (!bonusFinalized) {
+    return { points: 0, championCorrect: false, topScorerCorrect: false };
+  }
+
   const champion = settingValue(settings, "champion");
   const topScorer = settingValue(settings, "top_scorer");
   const championCorrect = Boolean(
@@ -507,6 +512,7 @@ export async function GET() {
       poolSettings: {
         champion: settingValue(settingRows, "champion"),
         topScorer: settingValue(settingRows, "top_scorer"),
+        bonusFinalized: settingValue(settingRows, "bonus_finalized") === "true",
       },
     });
   } catch (error) {
@@ -535,6 +541,7 @@ export async function POST(request: Request) {
       topScorerGuess?: string;
       champion?: string | null;
       topScorer?: string | null;
+      bonusFinalized?: boolean;
     };
 
     if (payload.action === "addParticipant") {
@@ -795,6 +802,11 @@ export async function POST(request: Request) {
           {
             key: "top_scorer",
             value: normalizeAccessCode(payload.topScorer) || null,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            key: "bonus_finalized",
+            value: payload.bonusFinalized ? "true" : "false",
             updated_at: new Date().toISOString(),
           },
         ]),
