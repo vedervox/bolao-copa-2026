@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/bolao/sync-results",
+      "path": "/api/sync-results",
       "schedule": "0 * * * *"
     }
   ]
