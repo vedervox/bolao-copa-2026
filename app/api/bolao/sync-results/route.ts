@@ -12,10 +12,17 @@ type MatchRow = {
 
 type ApiFootballFixture = {
   fixture: {
+    id?: number;
     date: string;
     status: {
       short: string;
+      long?: string;
     };
+  };
+  league?: {
+    id?: number;
+    name?: string;
+    season?: number;
   };
   teams: {
     home: {
@@ -29,22 +36,20 @@ type ApiFootballFixture = {
     home: number | null;
     away: number | null;
   };
-  score?: {
-    extratime?: {
-      home: number | null;
-      away: number | null;
-    };
-  };
 };
 
 type ApiFootballResponse = {
+  errors?: unknown;
+  results?: number;
   response?: ApiFootballFixture[];
 };
 
 const WORLD_CUP_LEAGUE_ID = process.env.API_FOOTBALL_LEAGUE_ID ?? "1";
 const WORLD_CUP_SEASON = process.env.API_FOOTBALL_SEASON ?? "2026";
-const WORLD_CUP_FROM = process.env.API_FOOTBALL_FROM ?? "2026-06-11";
-const WORLD_CUP_TO = process.env.API_FOOTBALL_TO ?? "2026-07-19";
+const TOURNAMENT_FROM = process.env.API_FOOTBALL_FROM ?? "2026-06-11";
+const TOURNAMENT_TO = process.env.API_FOOTBALL_TO ?? "2026-07-19";
+const LOOKBACK_DAYS = Number(process.env.API_FOOTBALL_LOOKBACK_DAYS ?? 5);
+const LOOKAHEAD_DAYS = Number(process.env.API_FOOTBALL_LOOKAHEAD_DAYS ?? 1);
 const FINISHED_STATUS = new Set(["FT", "AET", "PEN"]);
 
 function getSupabaseConfig() {
@@ -95,25 +100,34 @@ function normalizeTeamName(value: string) {
     .trim();
 
   const aliases: Record<string, string> = {
+    australia: "australia",
+    belgium: "belgium",
     brasil: "brazil",
-    marrocos: "morocco",
-    escocia: "scotland",
-    tchequia: "czechia",
-    "czech republic": "czechia",
-    "korea republic": "south korea",
-    "republic of korea": "south korea",
-    usa: "united states",
-    "u s a": "united states",
+    brazil: "brazil",
+    canada: "canada",
+    "cabo verde": "cape verde",
+    "cape verde": "cape verde",
+    "congo dr": "dr congo",
     "cote d ivoire": "ivory coast",
     "cote divoire": "ivory coast",
-    "ivory coast": "ivory coast",
     curacao: "curacao",
-    turkiye: "turkey",
-    "cape verde": "cape verde",
-    "cabo verde": "cape verde",
+    czechia: "czechia",
+    "czech republic": "czechia",
     "dr congo": "dr congo",
-    "congo dr": "dr congo",
-    "bosnia herzegovina": "bosnia and herzegovina",
+    ecuador: "ecuador",
+    escocia: "scotland",
+    "korea republic": "south korea",
+    marrocos: "morocco",
+    "republic of korea": "south korea",
+    scotland: "scotland",
+    "south korea": "south korea",
+    tchequia: "czechia",
+    turkey: "turkey",
+    turkiye: "turkey",
+    "u s a": "united states",
+    usa: "united states",
+    "united states": "united states",
+    "united states of america": "united states",
   };
 
   return aliases[normalized] ?? normalized;
@@ -130,27 +144,62 @@ function isDefinedTeam(team: string) {
   );
 }
 
-function sameUtcDay(left: string, right: string) {
-  return new Date(left).toISOString().slice(0, 10) === new Date(right).toISOString().slice(0, 10);
+function formatDateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function addDays(value: Date, days: number) {
+  const next = new Date(value);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function getSyncWindow(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("full") === "1") {
+    return { from: TOURNAMENT_FROM, to: TOURNAMENT_TO, full: true };
+  }
+
+  const now = new Date();
+  return {
+    from: formatDateKey(addDays(now, -LOOKBACK_DAYS)),
+    to: formatDateKey(addDays(now, LOOKAHEAD_DAYS)),
+    full: false,
+  };
+}
+
+function hoursBetween(left: string, right: string) {
+  return Math.abs(new Date(left).getTime() - new Date(right).getTime()) / 36e5;
+}
+
+function fixtureSummary(fixture: ApiFootballFixture) {
+  return {
+    apiFixtureId: fixture.fixture.id ?? null,
+    date: fixture.fixture.date,
+    status: fixture.fixture.status.short,
+    home: fixture.teams.home.name,
+    away: fixture.teams.away.name,
+    goals: `${fixture.goals.home ?? "-"} x ${fixture.goals.away ?? "-"}`,
+  };
 }
 
 function matchesFixture(match: MatchRow, fixture: ApiFootballFixture) {
-  return (
+  const sameTeams =
     normalizeTeamName(match.home_team) === normalizeTeamName(fixture.teams.home.name) &&
-    normalizeTeamName(match.away_team) === normalizeTeamName(fixture.teams.away.name) &&
-    sameUtcDay(match.match_date, fixture.fixture.date)
-  );
+    normalizeTeamName(match.away_team) === normalizeTeamName(fixture.teams.away.name);
+
+  return sameTeams && hoursBetween(match.match_date, fixture.fixture.date) <= 36;
 }
 
-async function fetchApiFootballFixtures() {
+async function fetchApiFootballFixtures(window: { from: string; to: string }) {
   const apiKey = process.env.API_FOOTBALL_KEY;
   if (!apiKey) throw new Error("Configure API_FOOTBALL_KEY na Vercel.");
 
   const params = new URLSearchParams({
     league: WORLD_CUP_LEAGUE_ID,
     season: WORLD_CUP_SEASON,
-    from: WORLD_CUP_FROM,
-    to: WORLD_CUP_TO,
+    from: window.from,
+    to: window.to,
   });
   const response = await fetch(`https://v3.football.api-sports.io/fixtures?${params}`, {
     headers: {
@@ -159,23 +208,24 @@ async function fetchApiFootballFixtures() {
     cache: "no-store",
   });
 
+  const data = (await response.json()) as ApiFootballResponse;
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Erro API-Football ${response.status}`);
+    throw new Error(JSON.stringify(data.errors ?? data));
   }
 
-  const data = (await response.json()) as ApiFootballResponse;
-  return data.response ?? [];
+  return data;
 }
 
-async function syncFinishedResults() {
-  const [matches, fixtures] = await Promise.all([
+async function syncFinishedResults(request: Request) {
+  const window = getSyncWindow(request);
+  const [matches, apiData] = await Promise.all([
     supabase<MatchRow[]>(
       "matches?select=id,home_team,away_team,group_name,match_date,status,home_score,away_score,qualified_team&order=match_date.asc,id.asc"
     ),
-    fetchApiFootballFixtures(),
+    fetchApiFootballFixtures(window),
   ]);
 
+  const fixtures = apiData.response ?? [];
   const finishedFixtures = fixtures.filter((fixture) => {
     return (
       FINISHED_STATUS.has(fixture.fixture.status.short) &&
@@ -183,16 +233,26 @@ async function syncFinishedResults() {
       fixture.goals.away !== null
     );
   });
-
+  const eligibleMatches = matches.filter(
+    (match) => isDefinedTeam(match.home_team) && isDefinedTeam(match.away_team)
+  );
   const updates = [];
+  const unchanged = [];
+  const unmatchedFinishedFixtures = [];
 
-  for (const match of matches) {
-    if (!isDefinedTeam(match.home_team) || !isDefinedTeam(match.away_team)) continue;
-
-    const fixture = finishedFixtures.find((item) => matchesFixture(match, item));
-    if (!fixture || fixture.goals.home === null || fixture.goals.away === null) continue;
+  for (const fixture of finishedFixtures) {
+    const match = eligibleMatches.find((item) => matchesFixture(item, fixture));
+    if (!match || fixture.goals.home === null || fixture.goals.away === null) {
+      unmatchedFinishedFixtures.push(fixtureSummary(fixture));
+      continue;
+    }
 
     if (match.home_score === fixture.goals.home && match.away_score === fixture.goals.away) {
+      unchanged.push({
+        id: match.id,
+        jogo: `${match.home_team} x ${match.away_team}`,
+        placar: `${fixture.goals.home} x ${fixture.goals.away}`,
+      });
       continue;
     }
 
@@ -216,9 +276,24 @@ async function syncFinishedResults() {
 
   return {
     ok: true,
-    checkedFixtures: finishedFixtures.length,
+    params: {
+      league: WORLD_CUP_LEAGUE_ID,
+      season: WORLD_CUP_SEASON,
+      from: window.from,
+      to: window.to,
+      full: window.full,
+    },
+    apiResults: apiData.results ?? fixtures.length,
+    apiErrors: apiData.errors ?? null,
+    finishedFixtures: finishedFixtures.length,
+    eligibleMatches: eligibleMatches.length,
     updated: updates.length,
+    unchanged: unchanged.length,
     updates,
+    diagnostics: {
+      sampleFixtures: fixtures.slice(0, 8).map(fixtureSummary),
+      unmatchedFinishedFixtures: unmatchedFinishedFixtures.slice(0, 12),
+    },
   };
 }
 
@@ -238,10 +313,10 @@ export async function GET(request: Request) {
       return Response.json({ error: "Nao autorizado." }, { status: 401 });
     }
 
-    const result = await syncFinishedResults();
+    const result = await syncFinishedResults(request);
     return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }
