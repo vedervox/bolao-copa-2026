@@ -169,6 +169,60 @@ function findGuess(guesses: Guess[], participantId: number | null, matchId: numb
   );
 }
 
+function getGuessResult(guess: Guess, match: Match) {
+  if (match.homeScore === null || match.awayScore === null) {
+    return {
+      label: "Aguardando resultado",
+      points: null as number | null,
+      className: "bg-[#edf1ee] text-[#5e6a63]",
+      rowClassName: "bg-white",
+    };
+  }
+
+  const exact = guess.homeGuess === match.homeScore && guess.awayGuess === match.awayScore;
+  const actualDirection = Math.sign(match.homeScore - match.awayScore);
+  const guessedDirection = Math.sign(guess.homeGuess - guess.awayGuess);
+  const trend = actualDirection === guessedDirection;
+
+  if (exact) {
+    return {
+      label: "Placar exato",
+      points: 10,
+      className: "bg-[#1d6b57] text-white",
+      rowClassName: "bg-[#eef8f3]",
+    };
+  }
+
+  if (trend) {
+    const actualDiff = match.homeScore - match.awayScore;
+    const guessedDiff = guess.homeGuess - guess.awayGuess;
+    const actualWinnerGoals =
+      actualDirection > 0 ? match.homeScore : actualDirection < 0 ? match.awayScore : null;
+    const guessedWinnerGoals =
+      actualDirection > 0 ? guess.homeGuess : actualDirection < 0 ? guess.awayGuess : null;
+    const points =
+      actualWinnerGoals !== null && guessedWinnerGoals === actualWinnerGoals
+        ? 5
+        : actualDiff === guessedDiff
+          ? 3
+          : 2;
+
+    return {
+      label: "Tendência",
+      points,
+      className: "bg-[#f0c44c] text-[#18211f]",
+      rowClassName: "bg-[#fff9e7]",
+    };
+  }
+
+  return {
+    label: "Sem ponto",
+    points: 0,
+    className: "bg-[#edf1ee] text-[#5e6a63]",
+    rowClassName: "bg-white",
+  };
+}
+
 export default function Home() {
   const [data, setData] = useState<BolaoData>(emptyData);
   const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null);
@@ -1241,11 +1295,12 @@ function GuessesPanel({
               const guess = data.guesses.find(
                 (item) => item.participantId === participant.id && item.matchId === selectedMatch.id
               );
+              const result = guess ? getGuessResult(guess, selectedMatch) : null;
 
               return (
                 <div
                   key={participant.id}
-                  className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-[#e7ede9] p-4"
+                  className={`grid grid-cols-[1fr_auto] items-center gap-3 border-t border-[#e7ede9] p-4 ${result?.rowClassName ?? "bg-white"}`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-bold">{participant.name}</p>
@@ -1253,11 +1308,14 @@ function GuessesPanel({
                       {participant.exact} exatos · {participant.trend} tendências · {participant.total} pontos
                     </p>
                   </div>
-                  {guess ? (
+                  {guess && result ? (
                     <div className="text-right">
-                      <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
+                      <strong className={`rounded-md px-3 py-2 text-lg ${result.className}`}>
                         {guess.homeGuess} x {guess.awayGuess}
                       </strong>
+                      <p className="mt-2 text-xs font-black text-[#18211f]">
+                        {result.label}{result.points !== null ? ` · ${result.points} pts` : ""}
+                      </p>
                       {guess.qualifiedTeamGuess && (
                         <p className="mt-2 text-xs font-bold text-[#1d6b57]">
                           Classifica: {guess.qualifiedTeamGuess}
@@ -1344,10 +1402,13 @@ function ParticipantGuessesPanel({
         </p>
       ) : (
         <div className="mt-4 grid gap-3">
-          {participantGuesses.map(({ guess, match }) => (
+          {participantGuesses.map(({ guess, match }) => {
+            const result = getGuessResult(guess, match);
+
+            return (
             <div
               key={guess.id}
-              className="rounded-lg border border-[#e7ede9] bg-[#f8faf8] p-4"
+              className={`rounded-lg border border-[#e7ede9] p-4 ${result.rowClassName}`}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -1357,9 +1418,14 @@ function ParticipantGuessesPanel({
                   </p>
                   <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
                 </div>
-                <strong className="rounded-md bg-[#f0c44c] px-3 py-2 text-lg">
-                  {guess.homeGuess} x {guess.awayGuess}
-                </strong>
+                <div className="text-right">
+                  <strong className={`rounded-md px-3 py-2 text-lg ${result.className}`}>
+                    {guess.homeGuess} x {guess.awayGuess}
+                  </strong>
+                  <p className="mt-2 text-xs font-black text-[#18211f]">
+                    {result.label}{result.points !== null ? ` · ${result.points} pts` : ""}
+                  </p>
+                </div>
               </div>
               {guess.qualifiedTeamGuess && (
                 <p className="mt-3 rounded-md bg-[#e7f4ef] px-3 py-2 text-sm font-bold text-[#1d6b57]">
@@ -1378,7 +1444,8 @@ function ParticipantGuessesPanel({
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
