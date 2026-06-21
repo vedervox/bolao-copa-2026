@@ -169,58 +169,131 @@ function findGuess(guesses: Guess[], participantId: number | null, matchId: numb
   );
 }
 
-function getGuessResult(guess: Guess, match: Match) {
-  if (match.homeScore === null || match.awayScore === null) {
+function scoreGuessForMatch(guess: Guess, match: Match) {
+  if (match.homeScore === null || match.awayScore === null) return null;
+
+  let points = 0;
+  const exact = guess.homeGuess === match.homeScore && guess.awayGuess === match.awayScore;
+
+  if (exact) {
+    points = 10;
+  } else {
+    const actualDirection = Math.sign(match.homeScore - match.awayScore);
+    const guessedDirection = Math.sign(guess.homeGuess - guess.awayGuess);
+
+    if (actualDirection === guessedDirection) {
+      const actualDiff = match.homeScore - match.awayScore;
+      const guessedDiff = guess.homeGuess - guess.awayGuess;
+      const actualWinnerGoals =
+        actualDirection > 0 ? match.homeScore : actualDirection < 0 ? match.awayScore : null;
+      const guessedWinnerGoals =
+        actualDirection > 0 ? guess.homeGuess : actualDirection < 0 ? guess.awayGuess : null;
+
+      if (actualWinnerGoals !== null && guessedWinnerGoals === actualWinnerGoals) {
+        points = 5;
+      } else if (actualDiff === guessedDiff) {
+        points = 3;
+      } else {
+        points = 2;
+      }
+    }
+  }
+
+  if (
+    isKnockoutMatch(match) &&
+    match.qualifiedTeam &&
+    guess.qualifiedTeamGuess &&
+    normalizeTeamName(match.qualifiedTeam) === normalizeTeamName(guess.qualifiedTeamGuess)
+  ) {
+    points += 2;
+  }
+
+  return points;
+}
+
+function scoreResultLabel(points: number | null) {
+  if (points === null) return null;
+  if (points >= 10) return "Placar exato";
+  if (points >= 5) return "Vencedor + gols";
+  if (points >= 3) return "Saldo";
+  if (points >= 2) return "Tendência";
+  return "Sem ponto";
+}
+
+function getGuessDisplay(guess: Guess, match: Match) {
+  const points = scoreGuessForMatch(guess, match);
+  const label = scoreResultLabel(points) ?? "Aguardando resultado";
+
+  if (points === null) {
     return {
-      label: "Aguardando resultado",
-      points: null as number | null,
-      className: "bg-[#edf1ee] text-[#5e6a63]",
+      label,
+      points,
+      officialClassName: "bg-white text-[#5e6a63]",
+      guessClassName: "bg-[#edf1ee] text-[#5e6a63]",
       rowClassName: "bg-white",
     };
   }
 
-  const exact = guess.homeGuess === match.homeScore && guess.awayGuess === match.awayScore;
-  const actualDirection = Math.sign(match.homeScore - match.awayScore);
-  const guessedDirection = Math.sign(guess.homeGuess - guess.awayGuess);
-  const trend = actualDirection === guessedDirection;
-
-  if (exact) {
+  if (points >= 10) {
     return {
-      label: "Placar exato",
-      points: 10,
-      className: "bg-[#1d6b57] text-white",
+      label,
+      points,
+      officialClassName: "bg-white text-[#1d6b57]",
+      guessClassName: "bg-[#1d6b57] text-white",
       rowClassName: "bg-[#eef8f3]",
     };
   }
 
-  if (trend) {
-    const actualDiff = match.homeScore - match.awayScore;
-    const guessedDiff = guess.homeGuess - guess.awayGuess;
-    const actualWinnerGoals =
-      actualDirection > 0 ? match.homeScore : actualDirection < 0 ? match.awayScore : null;
-    const guessedWinnerGoals =
-      actualDirection > 0 ? guess.homeGuess : actualDirection < 0 ? guess.awayGuess : null;
-    const points =
-      actualWinnerGoals !== null && guessedWinnerGoals === actualWinnerGoals
-        ? 5
-        : actualDiff === guessedDiff
-          ? 3
-          : 2;
-
+  if (points > 0) {
     return {
-      label: "Tendência",
+      label,
       points,
-      className: "bg-[#f0c44c] text-[#18211f]",
+      officialClassName: "bg-white text-[#1d6b57]",
+      guessClassName: "bg-[#f0c44c] text-[#18211f]",
       rowClassName: "bg-[#fff9e7]",
     };
   }
 
   return {
-    label: "Sem ponto",
-    points: 0,
-    className: "bg-[#edf1ee] text-[#5e6a63]",
+    label,
+    points,
+    officialClassName: "bg-white text-[#5e6a63]",
+    guessClassName: "bg-[#edf1ee] text-[#5e6a63]",
     rowClassName: "bg-white",
   };
+}
+
+function ScoreComparison({ match, guess }: { match: Match; guess: Guess }) {
+  const display = getGuessDisplay(guess, match);
+  const hasResult = hasOfficialResult(match);
+
+  return (
+    <div className="grid min-w-[240px] grid-cols-2 gap-2 text-center">
+      <div className={`rounded-md border border-[#d7dfd9] px-3 py-2 ${display.officialClassName}`}>
+        <span className="block text-xs font-black uppercase tracking-wide text-[#5e6a63]">
+          Oficial
+        </span>
+        <strong className="mt-1 block text-lg">
+          {hasResult ? `${match.homeScore} x ${match.awayScore}` : "- x -"}
+        </strong>
+      </div>
+
+      <div className={`rounded-md border border-[#d7dfd9] px-3 py-2 ${display.guessClassName}`}>
+        <span className="block text-xs font-black uppercase tracking-wide text-[#5e6a63]">
+          Palpite
+        </span>
+        <strong className="mt-1 block text-lg">
+          {guess.homeGuess} x {guess.awayGuess}
+        </strong>
+      </div>
+
+      <p className="col-span-2 text-right text-xs font-black text-[#18211f]">
+        {hasResult
+          ? `${display.label} · ${display.points} pts`
+          : "Aguardando resultado oficial"}
+      </p>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -1295,12 +1368,12 @@ function GuessesPanel({
               const guess = data.guesses.find(
                 (item) => item.participantId === participant.id && item.matchId === selectedMatch.id
               );
-              const result = guess ? getGuessResult(guess, selectedMatch) : null;
+              const display = guess ? getGuessDisplay(guess, selectedMatch) : null;
 
               return (
                 <div
                   key={participant.id}
-                  className={`grid grid-cols-[1fr_auto] items-center gap-3 border-t border-[#e7ede9] p-4 ${result?.rowClassName ?? "bg-white"}`}
+                  className={`grid grid-cols-[1fr_auto] items-center gap-3 border-t border-[#e7ede9] p-4 ${display?.rowClassName ?? "bg-white"}`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-bold">{participant.name}</p>
@@ -1308,14 +1381,9 @@ function GuessesPanel({
                       {participant.exact} exatos · {participant.trend} tendências · {participant.total} pontos
                     </p>
                   </div>
-                  {guess && result ? (
+                  {guess ? (
                     <div className="text-right">
-                      <strong className={`rounded-md px-3 py-2 text-lg ${result.className}`}>
-                        {guess.homeGuess} x {guess.awayGuess}
-                      </strong>
-                      <p className="mt-2 text-xs font-black text-[#18211f]">
-                        {result.label}{result.points !== null ? ` · ${result.points} pts` : ""}
-                      </p>
+                      <ScoreComparison match={selectedMatch} guess={guess} />
                       {guess.qualifiedTeamGuess && (
                         <p className="mt-2 text-xs font-bold text-[#1d6b57]">
                           Classifica: {guess.qualifiedTeamGuess}
@@ -1403,30 +1471,21 @@ function ParticipantGuessesPanel({
       ) : (
         <div className="mt-4 grid gap-3">
           {participantGuesses.map(({ guess, match }) => {
-            const result = getGuessResult(guess, match);
-
             return (
-            <div
-              key={guess.id}
-              className={`rounded-lg border border-[#e7ede9] p-4 ${result.rowClassName}`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
-                  <p className="mt-1 font-black">
-                    {match.homeTeam} x {match.awayTeam}
-                  </p>
-                  <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
+              <div
+                key={guess.id}
+                className={`rounded-lg border border-[#e7ede9] p-4 ${getGuessDisplay(guess, match).rowClassName}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-[#1d6b57]">{match.groupName}</p>
+                    <p className="mt-1 font-black">
+                      {match.homeTeam} x {match.awayTeam}
+                    </p>
+                    <p className="mt-1 text-sm text-[#5e6a63]">{formatDate(match.matchDate)}</p>
+                  </div>
+                  <ScoreComparison match={match} guess={guess} />
                 </div>
-                <div className="text-right">
-                  <strong className={`rounded-md px-3 py-2 text-lg ${result.className}`}>
-                    {guess.homeGuess} x {guess.awayGuess}
-                  </strong>
-                  <p className="mt-2 text-xs font-black text-[#18211f]">
-                    {result.label}{result.points !== null ? ` · ${result.points} pts` : ""}
-                  </p>
-                </div>
-              </div>
               {guess.qualifiedTeamGuess && (
                 <p className="mt-3 rounded-md bg-[#e7f4ef] px-3 py-2 text-sm font-bold text-[#1d6b57]">
                   Classifica: {guess.qualifiedTeamGuess}
