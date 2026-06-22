@@ -301,6 +301,7 @@ export default function Home() {
   const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
   const [name, setName] = useState("");
+  const [newParticipantPin, setNewParticipantPin] = useState("");
   const [accessCode, setAccessCode] = useState("");
   const [loginParticipantId, setLoginParticipantId] = useState<number | null>(null);
   const [viewedParticipantId, setViewedParticipantId] = useState<number | null>(null);
@@ -391,11 +392,6 @@ export default function Home() {
   const selectedParticipant = useMemo(
     () => data.participants.find((participant) => participant.id === selectedParticipantId),
     [data.participants, selectedParticipantId]
-  );
-
-  const loginParticipant = useMemo(
-    () => data.participants.find((participant) => participant.id === loginParticipantId),
-    [data.participants, loginParticipantId]
   );
 
   const viewedParticipant = useMemo(
@@ -535,13 +531,15 @@ export default function Home() {
   function addParticipant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const participantName = name.trim();
-    if (!participantName) return;
+    const pin = newParticipantPin.trim();
+    if (!participantName || pin.length < 4) return;
 
     send(
-      { action: "addParticipant", name: participantName, accessCode },
+      { action: "addParticipant", name: participantName, accessCode: pin },
       `${participantName} entrou no bolão.`
     );
     setName("");
+    setNewParticipantPin("");
   }
 
   async function login() {
@@ -640,18 +638,11 @@ export default function Home() {
     }));
   }
 
-  async function saveVisibleGuesses(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function saveMatches(matchesToSave: Match[], successMessage: string) {
     if (!selectedParticipantId) {
       setMessage("Adicione ou selecione um participante antes de salvar.");
       return;
     }
-
-    const matchesToSave = filteredMatches.filter((match) => {
-      const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
-      return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
-    });
 
     if (matchesToSave.length === 0) {
       setMessage("Não há jogos disponíveis para salvar nesta lista.");
@@ -676,16 +667,27 @@ export default function Home() {
       }
 
       await load();
-      setMessage(
-        activeTab === "brasil"
-          ? "Palpites dos jogos do Brasil salvos e bloqueados."
-          : "Palpites dos jogos selecionados salvos e bloqueados."
-      );
+      setMessage(successMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro ao salvar.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveVisibleGuesses(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    await saveMatches(
+      filteredMatches,
+      activeTab === "brasil"
+        ? "Palpites dos jogos do Brasil salvos e bloqueados."
+        : "Palpites dos jogos selecionados salvos e bloqueados."
+    );
+  }
+
+  async function saveDayGuesses(dayLabel: string, matches: Match[]) {
+    await saveMatches(matches, `Palpites de ${dayLabel} salvos e bloqueados.`);
   }
 
   function changeTab(tab: GuessTab) {
@@ -764,7 +766,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f3f6f4] text-[#18211f]">
       <section className="border-b border-[#d7dfd9] bg-white">
-        <div className="mx-auto grid max-w-7xl gap-8 px-5 py-6 lg:grid-cols-[1.15fr_0.85fr] lg:px-8">
+        <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
           <div className="flex flex-col justify-between gap-7">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -787,44 +789,11 @@ export default function Home() {
               <SummaryCard label="Líder" value={leader?.name ?? "-"} />
             </div>
           </div>
-
-          <form
-            onSubmit={addParticipant}
-            className="rounded-lg border border-[#d7dfd9] bg-white p-5 shadow-sm"
-          >
-            <label className="text-sm font-semibold text-[#405047]" htmlFor="name">
-              Novo participante
-            </label>
-            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_140px]">
-              <input
-                id="name"
-                className="min-h-12 flex-1 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Nome da pessoa"
-              />
-              <input
-                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
-                value={accessCode}
-                onChange={(event) => setAccessCode(event.target.value)}
-                placeholder="PIN"
-                type="password"
-                inputMode="numeric"
-              />
-              <button
-                disabled={busy || !name.trim() || accessCode.trim().length < 4}
-                className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f] sm:col-span-2"
-              >
-                Adicionar
-              </button>
-            </div>
-            <p className="mt-4 text-sm text-[#5e6a63]">{message}</p>
-          </form>
         </div>
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-6 px-5 py-6 lg:grid-cols-[0.75fr_1.25fr] lg:px-8">
-        <div className="space-y-6">
+        <div className="order-2 space-y-6 lg:order-1">
           <div>
             <h2 className="text-2xl font-black">Ranking</h2>
             <div className="mt-3 overflow-hidden rounded-lg border border-[#d7dfd9] bg-white">
@@ -1021,7 +990,118 @@ export default function Home() {
           </form>
         </div>
 
-        <div className="space-y-6">
+        <div className="order-1 space-y-6 lg:order-2">
+          <section className="rounded-lg border-2 border-[#1d6b57] bg-white p-5 shadow-sm">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.12em] text-[#1d6b57]">
+                  Comece aqui
+                </p>
+                <h2 className="mt-1 text-2xl font-black">Entrar ou cadastrar</h2>
+              </div>
+              <span className="rounded-lg bg-[#e7f4ef] px-4 py-3 text-sm font-bold text-[#1d6b57]">
+                {selectedParticipant
+                  ? `Logado: ${selectedParticipant.name}`
+                  : "Entre para liberar os palpites"}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <div className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-4">
+                <h3 className="text-base font-black">Já tenho cadastro</h3>
+                <div className="mt-3 grid gap-3 md:grid-cols-[1fr_140px_auto] xl:grid-cols-1">
+                  <label className="text-sm font-semibold">
+                    Participante
+                    <select
+                      className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                      value={loginParticipantId ?? ""}
+                      onChange={(event) => setLoginParticipantId(Number(event.target.value))}
+                    >
+                      {data.participants.length === 0 && <option value="">Cadastre o primeiro participante</option>}
+                      {data.participants.map((participant) => (
+                        <option key={participant.id} value={participant.id}>
+                          {participant.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold">
+                    PIN
+                    <input
+                      className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                      value={accessCode}
+                      onChange={(event) => setAccessCode(event.target.value)}
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="4 dígitos"
+                    />
+                  </label>
+                  <div className="flex items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={login}
+                      disabled={busy || !loginParticipantId || accessCode.trim().length < 4}
+                      className="min-h-12 flex-1 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                    >
+                      Entrar
+                    </button>
+                    {selectedParticipantId && (
+                      <button
+                        type="button"
+                        onClick={logout}
+                        className="min-h-12 rounded-md border border-[#b8c6bd] px-4 font-bold text-[#405047]"
+                      >
+                        Sair
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <form
+                onSubmit={addParticipant}
+                className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-4"
+              >
+                <h3 className="text-base font-black">Primeiro acesso</h3>
+                <div className="mt-3 grid gap-3 md:grid-cols-[1fr_140px_auto] xl:grid-cols-1">
+                  <label className="text-sm font-semibold" htmlFor="name">
+                    Nome
+                    <input
+                      id="name"
+                      className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder="Nome da pessoa"
+                    />
+                  </label>
+                  <label className="text-sm font-semibold">
+                    Criar PIN
+                    <input
+                      className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                      value={newParticipantPin}
+                      onChange={(event) => setNewParticipantPin(event.target.value)}
+                      placeholder="4 dígitos"
+                      type="password"
+                      inputMode="numeric"
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <button
+                      disabled={busy || !name.trim() || newParticipantPin.trim().length < 4}
+                      className="min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                    >
+                      Cadastrar
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <p className="mt-4 rounded-md bg-[#edf1ee] px-3 py-2 text-sm font-bold text-[#405047]">
+              {message}
+            </p>
+          </section>
+
           <form
             onSubmit={saveVisibleGuesses}
             className="rounded-lg border border-[#d7dfd9] bg-white p-5"
@@ -1038,62 +1118,11 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
-                <label className="text-sm font-semibold">
-                  Participante
-                  <select
-                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                    value={loginParticipantId ?? ""}
-                    onChange={(event) => setLoginParticipantId(Number(event.target.value))}
-                  >
-                    {data.participants.length === 0 && <option value="">Adicione um participante</option>}
-                    {data.participants.map((participant) => (
-                      <option key={participant.id} value={participant.id}>
-                        {participant.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm font-semibold">
-                  PIN
-                  <input
-                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                    value={accessCode}
-                    onChange={(event) => setAccessCode(event.target.value)}
-                    type="password"
-                    inputMode="numeric"
-                    placeholder="4 dígitos"
-                  />
-                </label>
-                <div className="flex items-end gap-2">
-                  <button
-                    type="button"
-                    onClick={login}
-                    disabled={busy || !loginParticipantId || accessCode.trim().length < 4}
-                    className="min-h-12 rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
-                  >
-                    Entrar
-                  </button>
-                  {selectedParticipantId && (
-                    <button
-                      type="button"
-                      onClick={logout}
-                      className="min-h-12 rounded-md border border-[#b8c6bd] px-4 font-bold text-[#405047]"
-                    >
-                      Sair
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p className="mt-3 text-sm font-bold text-[#1d6b57]">
-                {selectedParticipant
-                  ? `Você está lançando como ${selectedParticipant.name}.`
-                  : loginParticipant?.hasLogin
-                    ? "Entre com o PIN dessa pessoa antes de salvar."
-                  : "Primeiro acesso: esse PIN será definido para essa pessoa."}
+            {!selectedParticipantId && (
+              <p className="mt-4 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                Entre ou cadastre um participante no bloco acima antes de salvar palpites.
               </p>
-            </div>
+            )}
 
             <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f6f4] p-1">
               <button
@@ -1169,11 +1198,21 @@ export default function Home() {
               ) : (
                 matchesByDay.map((day) => (
                   <section key={day.dayKey} className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-3">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-lg font-black capitalize">{day.label}</h3>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#5e6a63]">
-                        {day.matches.length} jogos
-                      </span>
+                    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-black capitalize">{day.label}</h3>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#5e6a63]">
+                          {day.matches.length} jogos
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => saveDayGuesses(day.label, day.matches)}
+                        disabled={busy || !selectedParticipantId || day.matches.length === 0}
+                        className="min-h-10 rounded-md bg-[#1d6b57] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                      >
+                        Salvar este dia
+                      </button>
                     </div>
 
                     <div className="grid gap-3">
