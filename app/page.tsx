@@ -97,6 +97,19 @@ function formatDay(value: string) {
   }).format(new Date(value));
 }
 
+function formatDayKey(value: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+
+  return `${year}-${month}-${day}`;
+}
+
 function normalizeTeamName(value: string) {
   return value
     .normalize("NFD")
@@ -454,7 +467,7 @@ export default function Home() {
     const groups = new Map<string, Match[]>();
 
     filteredMatches.forEach((match) => {
-      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      const dayKey = formatDayKey(match.matchDate);
       groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
     });
 
@@ -469,7 +482,7 @@ export default function Home() {
     const groups = new Map<string, Match[]>();
 
     data.matches.forEach((match) => {
-      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      const dayKey = formatDayKey(match.matchDate);
       groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
     });
 
@@ -1353,7 +1366,7 @@ function GuessesPanel({
     const groups = new Map<string, Match[]>();
 
     data.matches.forEach((match) => {
-      const dayKey = new Date(match.matchDate).toISOString().slice(0, 10);
+      const dayKey = formatDayKey(match.matchDate);
       groups.set(dayKey, [...(groups.get(dayKey) ?? []), match]);
     });
 
