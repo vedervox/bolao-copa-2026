@@ -76,7 +76,7 @@ const emptyData: BolaoData = {
   },
 };
 
-const GUESS_DEADLINE_MINUTES = 30;
+const GUESS_DEADLINE_MINUTES = 5;
 const FIRST_BRAZIL_MATCH_DATE = new Date("2026-06-13T22:00:00.000Z");
 
 function formatDate(value: string) {
