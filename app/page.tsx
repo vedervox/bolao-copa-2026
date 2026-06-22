@@ -884,123 +884,126 @@ export default function Home() {
             </button>
           </form>
 
-          <form
-            onSubmit={updateResult}
-            className="rounded-lg border border-[#d7dfd9] bg-white p-5"
-          >
-            <h2 className="text-xl font-black">Resultado oficial</h2>
-            <p className="mt-1 text-sm text-[#5e6a63]">
-              Use somente depois que a partida acontecer. Antes da data do jogo, o sistema não deixa fechar resultado.
+          <details className="rounded-lg border border-[#d7dfd9] bg-white p-5">
+            <summary className="cursor-pointer text-xl font-black">
+              Administração
+            </summary>
+            <p className="mt-2 text-sm text-[#5e6a63]">
+              Área para corrigir resultados manualmente. Os participantes não precisam usar isso.
             </p>
-            <div className="mt-4 grid grid-cols-[1fr_72px_72px] items-end gap-3">
-              <label className="text-sm font-semibold">
-                Jogo
-                <select
-                  className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                  value={selectedMatch?.id ?? ""}
-                  onChange={(event) => setSelectedMatchId(Number(event.target.value))}
-                >
-                  {allMatchesByDay.map((day) => (
-                    <optgroup key={day.dayKey} label={day.label}>
-                      {day.matches.map((match) => (
-                        <option key={match.id} value={match.id}>
-                          {match.homeTeam} x {match.awayTeam}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
-              <ScoreInput label="Casa" value={homeScore} onChange={setHomeScore} />
-              <ScoreInput label="Fora" value={awayScore} onChange={setAwayScore} />
-            </div>
-            {selectedMatch && isKnockoutMatch(selectedMatch) && hasDefinedTeams(selectedMatch) && (
-              <label className="mt-3 block text-sm font-semibold">
-                Classificado
-                <select
-                  className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
-                  value={qualifiedTeam}
-                  onChange={(event) => setQualifiedTeam(event.target.value)}
-                >
-                  <option value="">Sem classificado</option>
-                  <option value={selectedMatch.homeTeam}>{selectedMatch.homeTeam}</option>
-                  <option value={selectedMatch.awayTeam}>{selectedMatch.awayTeam}</option>
-                </select>
-              </label>
-            )}
-            {selectedMatch && !hasMatchStarted(selectedMatch) && (
-              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
-                Esse jogo ainda não aconteceu. Resultado oficial só depois da partida.
-              </p>
-            )}
-            {selectedMatch && !hasDefinedTeams(selectedMatch) && (
-              <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
-                Placar bloqueado até os dois times estarem definidos.
-              </p>
-            )}
 
-            <button
-              disabled={
-                busy ||
-                !selectedMatch ||
-                !hasDefinedTeams(selectedMatch) ||
-                !hasMatchStarted(selectedMatch)
-              }
-              className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
-            >
-              Fechar resultado
-            </button>
+            <form onSubmit={updateResult} className="mt-5 rounded-lg border border-[#d7dfd9] p-4">
+              <h2 className="text-lg font-black">Resultado oficial</h2>
+              <p className="mt-1 text-sm text-[#5e6a63]">
+                Use somente depois que a partida acontecer.
+              </p>
+              <div className="mt-4 grid grid-cols-[1fr_72px_72px] items-end gap-3">
+                <label className="text-sm font-semibold">
+                  Jogo
+                  <select
+                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                    value={selectedMatch?.id ?? ""}
+                    onChange={(event) => setSelectedMatchId(Number(event.target.value))}
+                  >
+                    {allMatchesByDay.map((day) => (
+                      <optgroup key={day.dayKey} label={day.label}>
+                        {day.matches.map((match) => (
+                          <option key={match.id} value={match.id}>
+                            {match.homeTeam} x {match.awayTeam}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                <ScoreInput label="Casa" value={homeScore} onChange={setHomeScore} />
+                <ScoreInput label="Fora" value={awayScore} onChange={setAwayScore} />
+              </div>
+              {selectedMatch && isKnockoutMatch(selectedMatch) && hasDefinedTeams(selectedMatch) && (
+                <label className="mt-3 block text-sm font-semibold">
+                  Classificado
+                  <select
+                    className="mt-2 min-h-12 w-full rounded-md border border-[#b8c6bd] px-3"
+                    value={qualifiedTeam}
+                    onChange={(event) => setQualifiedTeam(event.target.value)}
+                  >
+                    <option value="">Sem classificado</option>
+                    <option value={selectedMatch.homeTeam}>{selectedMatch.homeTeam}</option>
+                    <option value={selectedMatch.awayTeam}>{selectedMatch.awayTeam}</option>
+                  </select>
+                </label>
+              )}
+              {selectedMatch && !hasMatchStarted(selectedMatch) && (
+                <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                  Esse jogo ainda não aconteceu. Resultado oficial só depois da partida.
+                </p>
+              )}
+              {selectedMatch && !hasDefinedTeams(selectedMatch) && (
+                <p className="mt-3 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
+                  Placar bloqueado até os dois times estarem definidos.
+                </p>
+              )}
 
-            {selectedMatch && hasOfficialResult(selectedMatch) && (
               <button
-                type="button"
-                onClick={clearResult}
-                disabled={busy}
-                className="mt-3 min-h-12 w-full rounded-md border border-[#c23d2f] px-5 font-bold text-[#c23d2f] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={
+                  busy ||
+                  !selectedMatch ||
+                  !hasDefinedTeams(selectedMatch) ||
+                  !hasMatchStarted(selectedMatch)
+                }
+                className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
               >
-                Limpar resultado lançado por engano
+                Fechar resultado
               </button>
-            )}
-          </form>
 
-          <form
-            onSubmit={updateBonusResults}
-            className="rounded-lg border border-[#d7dfd9] bg-white p-5"
-          >
-            <h2 className="text-xl font-black">Resultado das previsões extras</h2>
-            <p className="mt-1 text-sm text-[#5e6a63]">
-              Só marque a pontuação dos bônus depois da Copa terminar.
-            </p>
-            <div className="mt-4 grid gap-3">
-              <input
-                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
-                value={championResult}
-                onChange={(event) => setChampionResult(event.target.value)}
-                placeholder="Campeão oficial"
-              />
-              <input
-                className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
-                value={topScorerResult}
-                onChange={(event) => setTopScorerResult(event.target.value)}
-                placeholder="Artilheiro oficial"
-              />
-              <label className="flex items-start gap-3 rounded-md border border-[#d7dfd9] bg-[#f8faf8] p-3 text-sm font-bold">
+              {selectedMatch && hasOfficialResult(selectedMatch) && (
+                <button
+                  type="button"
+                  onClick={clearResult}
+                  disabled={busy}
+                  className="mt-3 min-h-12 w-full rounded-md border border-[#c23d2f] px-5 font-bold text-[#c23d2f] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Limpar resultado lançado por engano
+                </button>
+              )}
+            </form>
+
+            <form onSubmit={updateBonusResults} className="mt-4 rounded-lg border border-[#d7dfd9] p-4">
+              <h2 className="text-lg font-black">Resultado das previsões extras</h2>
+              <p className="mt-1 text-sm text-[#5e6a63]">
+                Só marque a pontuação dos bônus depois da Copa terminar.
+              </p>
+              <div className="mt-4 grid gap-3">
                 <input
-                  type="checkbox"
-                  checked={bonusFinalized}
-                  onChange={(event) => setBonusFinalized(event.target.checked)}
-                  className="mt-1 h-4 w-4"
+                  className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                  value={championResult}
+                  onChange={(event) => setChampionResult(event.target.value)}
+                  placeholder="Campeão oficial"
                 />
-                <span>Liberar pontuação dos bônus de campeão e artilheiro</span>
-              </label>
-            </div>
-            <button
-              disabled={busy}
-              className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
-            >
-              Atualizar bônus oficiais
-            </button>
-          </form>
+                <input
+                  className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
+                  value={topScorerResult}
+                  onChange={(event) => setTopScorerResult(event.target.value)}
+                  placeholder="Artilheiro oficial"
+                />
+                <label className="flex items-start gap-3 rounded-md border border-[#d7dfd9] bg-[#f8faf8] p-3 text-sm font-bold">
+                  <input
+                    type="checkbox"
+                    checked={bonusFinalized}
+                    onChange={(event) => setBonusFinalized(event.target.checked)}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>Liberar pontuação dos bônus de campeão e artilheiro</span>
+                </label>
+              </div>
+              <button
+                disabled={busy}
+                className="mt-4 min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+              >
+                Atualizar bônus oficiais
+              </button>
+            </form>
+          </details>
         </div>
 
         <div className="order-1 space-y-6 lg:order-2">
