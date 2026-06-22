@@ -318,6 +318,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("todos");
   const [drafts, setDrafts] = useState<Record<number, GuessDraft>>({});
+  const [currentTime, setCurrentTime] = useState(0);
 
   async function load() {
     const response = await fetch("/api/bolao", { cache: "no-store" });
@@ -336,6 +337,12 @@ export default function Home() {
     load().catch((error) =>
       setMessage(error instanceof Error ? error.message : "Erro ao carregar.")
     );
+  }, []);
+
+  useEffect(() => {
+    setCurrentTime(Date.now());
+    const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const selectedMatch = useMemo(
@@ -421,14 +428,21 @@ export default function Home() {
     return activeTab === "brasil" ? brazilMatches : data.matches;
   }, [activeTab, brazilMatches, data.matches]);
 
+  const availableTabMatches = useMemo(() => {
+    return tabMatches.filter((match) => {
+      const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
+      return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
+    });
+  }, [data.guesses, selectedParticipantId, tabMatches]);
+
   const groupOptions = useMemo(() => {
-    return Array.from(new Set(tabMatches.map((match) => match.groupName))).sort();
-  }, [tabMatches]);
+    return Array.from(new Set(availableTabMatches.map((match) => match.groupName))).sort();
+  }, [availableTabMatches]);
 
   const filteredMatches = useMemo(() => {
     const normalizedSearch = normalizeTeamName(search);
 
-    return tabMatches.filter((match) => {
+    return availableTabMatches.filter((match) => {
       const matchesGroup = groupFilter === "todos" || match.groupName === groupFilter;
       const matchesSearch =
         !normalizedSearch ||
@@ -438,7 +452,7 @@ export default function Home() {
 
       return matchesGroup && matchesSearch;
     });
-  }, [groupFilter, search, tabMatches]);
+  }, [availableTabMatches, groupFilter, search]);
 
   const matchesByDay = useMemo(() => {
     const groups = new Map<string, Match[]>();
@@ -481,11 +495,10 @@ export default function Home() {
   const saveableVisibleCount = useMemo(() => {
     if (!selectedParticipantId) return 0;
 
-    return filteredMatches.filter((match) => {
-      const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
-      return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
-    }).length;
-  }, [data.guesses, filteredMatches, selectedParticipantId]);
+    return filteredMatches.length;
+  }, [filteredMatches.length, selectedParticipantId]);
+
+  const bonusPredictionClosed = currentTime >= FIRST_BRAZIL_MATCH_DATE.getTime();
 
   async function post(payload: Record<string, unknown>) {
     const response = await fetch("/api/bolao", {
@@ -866,14 +879,14 @@ export default function Home() {
                 value={championGuess}
                 onChange={(event) => setChampionGuess(event.target.value)}
                 placeholder="Campeão da Copa"
-                disabled={Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()}
+                disabled={bonusPredictionClosed}
               />
               <input
                 className="min-h-12 rounded-md border border-[#b8c6bd] px-4 outline-none focus:border-[#1d6b57]"
                 value={topScorerGuess}
                 onChange={(event) => setTopScorerGuess(event.target.value)}
                 placeholder="Artilheiro"
-                disabled={Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()}
+                disabled={bonusPredictionClosed}
               />
             </div>
             <button
@@ -881,7 +894,7 @@ export default function Home() {
                 busy ||
                 !selectedParticipantId ||
                 accessCode.trim().length < 4 ||
-                Date.now() >= FIRST_BRAZIL_MATCH_DATE.getTime()
+                bonusPredictionClosed
               }
               className="mt-4 min-h-12 w-full rounded-md bg-[#1d6b57] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
             >
@@ -1021,7 +1034,7 @@ export default function Home() {
                 </p>
               </div>
               <div className="rounded-lg bg-[#e7f4ef] px-4 py-3 text-sm font-bold text-[#1d6b57]">
-                {tabGuessCount} de {tabMatches.length} palpites
+                {tabGuessCount} feitos · {availableTabMatches.length} disponíveis
               </div>
             </div>
 
@@ -1103,9 +1116,9 @@ export default function Home() {
               </button>
             </div>
 
-            {activeTab === "brasil" && brazilMatches.length > 0 && (
+            {activeTab === "brasil" && availableTabMatches.length > 0 && (
               <div className="mt-4 grid gap-2 rounded-lg border border-[#1d6b57] bg-[#e7f4ef] p-4 sm:grid-cols-3">
-                {brazilMatches.map((match) => (
+                {availableTabMatches.map((match) => (
                   <button
                     type="button"
                     key={match.id}
@@ -1140,18 +1153,18 @@ export default function Home() {
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-[#5e6a63]">
-              <span>Mostrando {filteredMatches.length} de {tabMatches.length} jogos</span>
+              <span>Mostrando {filteredMatches.length} de {availableTabMatches.length} jogos disponíveis</span>
               <span>
                 {activeTab === "brasil"
-                  ? "Brasil: Marrocos, Haiti e Escócia"
-                  : "Calendário completo por dia"}
+                  ? "Apenas jogos do Brasil ainda abertos"
+                  : "Apenas jogos ainda abertos para palpite"}
               </span>
             </div>
 
             <div className="mt-4 grid gap-3">
               {filteredMatches.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-[#b8c6bd] p-5 text-center text-[#5e6a63]">
-                  Nenhum jogo encontrado.
+                  Nenhum jogo disponível para lançar palpite.
                 </div>
               ) : (
                 matchesByDay.map((day) => (
@@ -1200,22 +1213,28 @@ export default function Home() {
                               </p>
                             )}
 
-                            <div className="mt-4 grid grid-cols-[1fr_72px_28px_72px_1fr] items-center gap-2">
-                              <strong className="truncate text-right">{match.homeTeam}</strong>
-                              <ScoreInput
-                                label=""
-                                value={draft.homeGuess}
-                                disabled={locked}
-                                onChange={(value) => updateDraft(match.id, "homeGuess", value)}
-                              />
-                              <span className="text-center font-black">x</span>
-                              <ScoreInput
-                                label=""
-                                value={draft.awayGuess}
-                                disabled={locked}
-                                onChange={(value) => updateDraft(match.id, "awayGuess", value)}
-                              />
-                              <strong className="truncate">{match.awayTeam}</strong>
+                            <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_72px_28px_72px_minmax(0,1fr)] sm:items-center sm:gap-2">
+                              <strong className="min-w-0 break-words text-base leading-tight sm:text-right">
+                                {match.homeTeam}
+                              </strong>
+                              <div className="grid grid-cols-[72px_28px_72px] items-center justify-center gap-2 sm:contents">
+                                <ScoreInput
+                                  label=""
+                                  value={draft.homeGuess}
+                                  disabled={locked}
+                                  onChange={(value) => updateDraft(match.id, "homeGuess", value)}
+                                />
+                                <span className="text-center font-black">x</span>
+                                <ScoreInput
+                                  label=""
+                                  value={draft.awayGuess}
+                                  disabled={locked}
+                                  onChange={(value) => updateDraft(match.id, "awayGuess", value)}
+                                />
+                              </div>
+                              <strong className="min-w-0 break-words text-base leading-tight">
+                                {match.awayTeam}
+                              </strong>
                             </div>
 
                             {isKnockoutMatch(match) && teamsDefined && (
