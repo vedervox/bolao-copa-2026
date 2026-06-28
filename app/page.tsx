@@ -973,8 +973,6 @@ export default function Home() {
             </div>
           </div>
 
-          <KnockoutRankingPanel scores={knockoutScores} />
-
           <ParticipantGuessesPanel
             data={data}
             viewedParticipant={viewedParticipant}
@@ -1255,6 +1253,8 @@ export default function Home() {
             </p>
           </section>
 
+          <KnockoutRankingPanel scores={knockoutScores} />
+
           <form
             onSubmit={saveVisibleGuesses}
             className="rounded-lg border border-[#d7dfd9] bg-white p-5"
@@ -1514,13 +1514,16 @@ export default function Home() {
             </button>
           </form>
 
-          <GuessesPanel
-            data={data}
-            selectedMatch={selectedMatch}
-            selectedMatchId={selectedMatchId}
-            setSelectedMatchId={setSelectedMatchId}
-          />
         </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-5 pb-8 lg:px-8">
+        <GuessesPanel
+          data={data}
+          selectedMatch={selectedMatch}
+          selectedMatchId={selectedMatchId}
+          setSelectedMatchId={setSelectedMatchId}
+        />
       </section>
     </main>
   );
