@@ -120,22 +120,22 @@ const initialMatches: readonly InitialMatch[] = [
   ["Panama", "Croatia", "Grupo L", "2026-06-23T23:00:00.000Z"],
   ["Panama", "England", "Grupo L", "2026-06-27T22:00:00.000Z"],
   ["Croatia", "Ghana", "Grupo L", "2026-06-27T22:00:00.000Z"],
-  ["2º Grupo A", "2º Grupo B", "16 avos", "2026-06-28T20:00:00.000Z"],
-  ["1º Grupo E", "3º Grupo A/B/C/D/F", "16 avos", "2026-06-29T20:00:00.000Z"],
-  ["1º Grupo F", "2º Grupo C", "16 avos", "2026-06-29T23:00:00.000Z"],
-  ["1º Grupo C", "2º Grupo F", "16 avos", "2026-06-30T01:00:00.000Z"],
-  ["1º Grupo I", "3º Grupo C/D/F/G/H", "16 avos", "2026-06-30T20:00:00.000Z"],
-  ["2º Grupo E", "2º Grupo I", "16 avos", "2026-06-30T23:00:00.000Z"],
-  ["1º Grupo A", "3º Grupo C/E/F/H/I", "16 avos", "2026-07-01T01:00:00.000Z"],
-  ["1º Grupo L", "3º Grupo E/H/I/J/K", "16 avos", "2026-07-01T20:00:00.000Z"],
-  ["1º Grupo D", "3º Grupo B/E/F/I/J", "16 avos", "2026-07-01T23:00:00.000Z"],
-  ["1º Grupo G", "3º Grupo A/E/H/I/J", "16 avos", "2026-07-02T01:00:00.000Z"],
-  ["2º Grupo K", "2º Grupo L", "16 avos", "2026-07-02T20:00:00.000Z"],
-  ["1º Grupo H", "2º Grupo J", "16 avos", "2026-07-02T23:00:00.000Z"],
-  ["1º Grupo B", "3º Grupo E/F/G/I/J", "16 avos", "2026-07-03T01:00:00.000Z"],
-  ["1º Grupo J", "2º Grupo H", "16 avos", "2026-07-03T20:00:00.000Z"],
-  ["1º Grupo K", "3º Grupo D/E/I/J/L", "16 avos", "2026-07-03T23:00:00.000Z"],
-  ["2º Grupo D", "2º Grupo G", "16 avos", "2026-07-04T01:00:00.000Z"],
+  ["South Africa", "Canada", "16 avos", "2026-06-28T20:00:00.000Z"],
+  ["Germany", "Paraguay", "16 avos", "2026-06-29T20:00:00.000Z"],
+  ["Netherlands", "Marrocos", "16 avos", "2026-06-29T23:00:00.000Z"],
+  ["Brasil", "Japan", "16 avos", "2026-06-30T01:00:00.000Z"],
+  ["France", "Sweden", "16 avos", "2026-06-30T20:00:00.000Z"],
+  ["Côte d'Ivoire", "Norway", "16 avos", "2026-06-30T23:00:00.000Z"],
+  ["Mexico", "Ecuador", "16 avos", "2026-07-01T01:00:00.000Z"],
+  ["England", "DR Congo", "16 avos", "2026-07-01T20:00:00.000Z"],
+  ["United States", "Bosnia and Herzegovina", "16 avos", "2026-07-01T23:00:00.000Z"],
+  ["Belgium", "Senegal", "16 avos", "2026-07-02T01:00:00.000Z"],
+  ["Portugal", "Croatia", "16 avos", "2026-07-02T20:00:00.000Z"],
+  ["Spain", "Austria", "16 avos", "2026-07-02T23:00:00.000Z"],
+  ["Switzerland", "Algeria", "16 avos", "2026-07-03T01:00:00.000Z"],
+  ["Argentina", "Cape Verde", "16 avos", "2026-07-03T20:00:00.000Z"],
+  ["Colombia", "Ghana", "16 avos", "2026-07-03T23:00:00.000Z"],
+  ["Australia", "Egypt", "16 avos", "2026-07-04T01:00:00.000Z"],
   ["Vencedor Jogo 74", "Vencedor Jogo 77", "Oitavas", "2026-07-04T20:00:00.000Z"],
   ["Vencedor Jogo 73", "Vencedor Jogo 75", "Oitavas", "2026-07-04T23:00:00.000Z"],
   ["Vencedor Jogo 76", "Vencedor Jogo 78", "Oitavas", "2026-07-05T20:00:00.000Z"],
@@ -385,6 +385,10 @@ function matchKey(match: Pick<MatchRow, "home_team" | "away_team" | "match_date"
   return `${match.home_team}__${match.away_team}__${new Date(match.match_date).toISOString()}`;
 }
 
+function isGroupStageSeed(match: InitialMatch) {
+  return normalizeTeamName(match[2]).startsWith("grupo ");
+}
+
 function isDemoMatch(match: MatchRow) {
   return (
     match.away_team.includes("Rival a definir") ||
@@ -412,7 +416,7 @@ async function ensureSeeded() {
   }
 
   const existingKeys = new Set(existing.map(matchKey));
-  const missing = initialMatches.filter(([homeTeam, awayTeam, , matchDate]) => {
+  const missing = initialMatches.filter(isGroupStageSeed).filter(([homeTeam, awayTeam, , matchDate]) => {
     return !existingKeys.has(
       `${homeTeam}__${awayTeam}__${new Date(matchDate).toISOString()}`
     );
