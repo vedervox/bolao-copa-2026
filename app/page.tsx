@@ -64,6 +64,15 @@ type GuessDraft = {
 
 type GuessTab = "brasil" | "todos";
 
+type KnockoutScore = {
+  participant: Participant;
+  total: number;
+  exact: number;
+  trend: number;
+  guesses: number;
+  scoredMatches: number;
+};
+
 const emptyData: BolaoData = {
   participants: [],
   matches: [],
@@ -276,6 +285,68 @@ function getGuessDisplay(guess: Guess, match: Match) {
   };
 }
 
+function getGuessTrend(guess: Guess, match: Match) {
+  if (match.homeScore === null || match.awayScore === null) return false;
+  return Math.sign(guess.homeGuess - guess.awayGuess) === Math.sign(match.homeScore - match.awayScore);
+}
+
+function getGuessExact(guess: Guess, match: Match) {
+  if (match.homeScore === null || match.awayScore === null) return false;
+  return guess.homeGuess === match.homeScore && guess.awayGuess === match.awayScore;
+}
+
+function KnockoutRankingPanel({ scores }: { scores: KnockoutScore[] }) {
+  const hasAnyGuess = scores.some((score) => score.guesses > 0);
+  const leader = scores[0];
+
+  return (
+    <div>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-black">Ranking mata-mata</h2>
+          <p className="mt-1 text-sm text-[#5e6a63]">
+            Só jogos eliminatórios, separado do ranking geral.
+          </p>
+        </div>
+        <span className="rounded-full bg-[#18211f] px-3 py-1 text-sm font-black text-white">
+          {leader?.total ?? 0} pts
+        </span>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-lg border border-[#d7dfd9] bg-white">
+        {!hasAnyGuess ? (
+          <p className="p-5 text-[#5e6a63]">
+            O painel começa a contar quando os palpites do mata-mata forem lançados.
+          </p>
+        ) : (
+          scores.map((score, index) => (
+            <div
+              key={score.participant.id}
+              className="grid grid-cols-[44px_1fr_auto] items-center gap-3 border-b border-[#e7ede9] p-4 last:border-b-0"
+            >
+              <span className="grid h-10 w-10 place-items-center rounded-full bg-[#1d6b57] font-black text-white">
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-bold">{score.participant.name}</p>
+                <p className="text-sm text-[#5e6a63]">
+                  {score.exact} exatos · {score.trend} tendências · {score.guesses} palpites
+                </p>
+              </div>
+              <div className="text-right">
+                <strong className="block text-2xl">{score.total}</strong>
+                <span className="text-xs font-bold text-[#5e6a63]">
+                  {score.scoredMatches} jogos
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ScoreComparison({ match, guess }: { match: Match; guess: Guess }) {
   const display = getGuessDisplay(guess, match);
   const hasResult = hasOfficialResult(match);
@@ -411,6 +482,50 @@ export default function Home() {
     () => data.participants.find((participant) => participant.id === viewedParticipantId),
     [data.participants, viewedParticipantId]
   );
+
+  const knockoutScores = useMemo(() => {
+    const matchesById = new Map(data.matches.map((match) => [match.id, match]));
+    const knockoutMatchIds = new Set(
+      data.matches.filter(isKnockoutMatch).map((match) => match.id)
+    );
+
+    return data.participants
+      .map((participant) => {
+        const participantGuesses = data.guesses.filter(
+          (guess) => guess.participantId === participant.id && knockoutMatchIds.has(guess.matchId)
+        );
+        const scored = participantGuesses.reduce(
+          (acc, guess) => {
+            const match = matchesById.get(guess.matchId);
+            if (!match) return acc;
+
+            const points = scoreGuessForMatch(guess, match);
+            const hasResult = points !== null;
+
+            return {
+              total: acc.total + (points ?? 0),
+              exact: acc.exact + (getGuessExact(guess, match) ? 1 : 0),
+              trend: acc.trend + (getGuessTrend(guess, match) ? 1 : 0),
+              scoredMatches: acc.scoredMatches + (hasResult ? 1 : 0),
+            };
+          },
+          { total: 0, exact: 0, trend: 0, scoredMatches: 0 }
+        );
+
+        return {
+          participant,
+          guesses: participantGuesses.length,
+          ...scored,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.total - a.total ||
+          b.exact - a.exact ||
+          b.trend - a.trend ||
+          a.participant.name.localeCompare(b.participant.name)
+      );
+  }, [data.guesses, data.matches, data.participants]);
 
   const selectedBonusPrediction = useMemo(
     () => data.bonusPredictions.find((prediction) => prediction.participantId === selectedParticipantId),
@@ -837,6 +952,8 @@ export default function Home() {
               )}
             </div>
           </div>
+
+          <KnockoutRankingPanel scores={knockoutScores} />
 
           <ParticipantGuessesPanel
             data={data}
