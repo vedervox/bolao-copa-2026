@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type Participant = {
   id: number;
@@ -62,7 +62,7 @@ type GuessDraft = {
   qualifiedTeamGuess: string;
 };
 
-type GuessTab = "brasil" | "todos";
+type GuessTab = "brasil" | "matamata" | "todos";
 
 type KnockoutScore = {
   participant: Participant;
@@ -548,16 +548,32 @@ export default function Home() {
     [data.matches]
   );
 
+  const knockoutMatches = useMemo(
+    () => data.matches.filter(isKnockoutMatch),
+    [data.matches]
+  );
+
   const tabMatches = useMemo(() => {
-    return activeTab === "brasil" ? brazilMatches : data.matches;
-  }, [activeTab, brazilMatches, data.matches]);
+    if (activeTab === "brasil") return brazilMatches;
+    if (activeTab === "matamata") return knockoutMatches;
+    return data.matches;
+  }, [activeTab, brazilMatches, data.matches, knockoutMatches]);
+
+  const isSaveableMatch = useCallback((match: Match) => {
+    const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
+    return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
+  }, [data.guesses, selectedParticipantId]);
 
   const availableTabMatches = useMemo(() => {
     return tabMatches.filter((match) => {
       const alreadyGuessed = Boolean(findGuess(data.guesses, selectedParticipantId, match.id));
+      if (activeTab === "matamata") {
+        return !alreadyGuessed && getMatchStatus(match) !== "finished";
+      }
+
       return !alreadyGuessed && hasDefinedTeams(match) && getMatchStatus(match) === "open";
     });
-  }, [data.guesses, selectedParticipantId, tabMatches]);
+  }, [activeTab, data.guesses, selectedParticipantId, tabMatches]);
 
   const groupOptions = useMemo(() => {
     return Array.from(new Set(availableTabMatches.map((match) => match.groupName))).sort();
@@ -619,8 +635,8 @@ export default function Home() {
   const saveableVisibleCount = useMemo(() => {
     if (!selectedParticipantId) return 0;
 
-    return filteredMatches.length;
-  }, [filteredMatches.length, selectedParticipantId]);
+    return filteredMatches.filter(isSaveableMatch).length;
+  }, [filteredMatches, isSaveableMatch, selectedParticipantId]);
 
   const bonusPredictionClosed = currentTime >= FIRST_BRAZIL_MATCH_DATE.getTime();
 
@@ -772,8 +788,10 @@ export default function Home() {
       return;
     }
 
-    if (matchesToSave.length === 0) {
-      setMessage("Não há jogos disponíveis para salvar nesta lista.");
+    const saveableMatches = matchesToSave.filter(isSaveableMatch);
+
+    if (saveableMatches.length === 0) {
+      setMessage("Não há jogos liberados para salvar nesta lista.");
       return;
     }
 
@@ -781,7 +799,7 @@ export default function Home() {
     setMessage("Salvando palpites...");
 
     try {
-      for (const match of matchesToSave) {
+      for (const match of saveableMatches) {
         const draft = drafts[match.id] ?? { homeGuess: 0, awayGuess: 0, qualifiedTeamGuess: "" };
         await post({
           action: "saveGuess",
@@ -810,7 +828,9 @@ export default function Home() {
       filteredMatches,
       activeTab === "brasil"
         ? "Palpites dos jogos do Brasil salvos e bloqueados."
-        : "Palpites dos jogos selecionados salvos e bloqueados."
+        : activeTab === "matamata"
+          ? "Palpites do mata-mata salvos e bloqueados."
+          : "Palpites dos jogos selecionados salvos e bloqueados."
     );
   }
 
@@ -1257,7 +1277,7 @@ export default function Home() {
               </p>
             )}
 
-            <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-[#f3f6f4] p-1">
+            <div className="mt-5 grid gap-2 rounded-lg bg-[#f3f6f4] p-1 sm:grid-cols-3">
               <button
                 type="button"
                 onClick={() => changeTab("brasil")}
@@ -1266,6 +1286,15 @@ export default function Home() {
                 }`}
               >
                 🇧🇷 Jogos do Brasil
+              </button>
+              <button
+                type="button"
+                onClick={() => changeTab("matamata")}
+                className={`min-h-11 rounded-md px-3 text-sm font-black transition ${
+                  activeTab === "matamata" ? "bg-[#1d6b57] text-white shadow-sm" : "text-[#405047]"
+                }`}
+              >
+                🏆 Mata-mata
               </button>
               <button
                 type="button"
@@ -1290,6 +1319,22 @@ export default function Home() {
                     Brasil x {getBrazilOpponent(match)}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {activeTab === "matamata" && (
+              <div className="mt-4 rounded-lg border border-[#1d6b57] bg-[#e7f4ef] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="font-black text-[#1d6b57]">Chave do mata-mata</h3>
+                    <p className="mt-1 text-sm text-[#405047]">
+                      Mostra todos os jogos eliminatórios até a final. Palpite só libera quando os dois times estiverem definidos.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-sm font-black text-[#1d6b57]">
+                    {availableTabMatches.length} jogos na chave
+                  </span>
+                </div>
               </div>
             )}
 
@@ -1319,6 +1364,8 @@ export default function Home() {
               <span>
                 {activeTab === "brasil"
                   ? "Apenas jogos do Brasil ainda abertos"
+                  : activeTab === "matamata"
+                    ? "Chave completa do mata-mata até a final"
                   : "Apenas jogos ainda abertos para palpite"}
               </span>
             </div>
@@ -1329,7 +1376,10 @@ export default function Home() {
                   Nenhum jogo disponível para lançar palpite.
                 </div>
               ) : (
-                matchesByDay.map((day) => (
+                matchesByDay.map((day) => {
+                  const daySaveableCount = day.matches.filter(isSaveableMatch).length;
+
+                  return (
                   <section key={day.dayKey} className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-3">
                     <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1341,10 +1391,10 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => saveDayGuesses(day.label, day.matches)}
-                        disabled={busy || !selectedParticipantId || day.matches.length === 0}
+                        disabled={busy || !selectedParticipantId || daySaveableCount === 0}
                         className="min-h-10 rounded-md bg-[#1d6b57] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
                       >
-                        Salvar este dia
+                        {daySaveableCount > 0 ? "Salvar este dia" : "Aguardando times"}
                       </button>
                     </div>
 
@@ -1447,7 +1497,8 @@ export default function Home() {
                       })}
                     </div>
                   </section>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -1455,7 +1506,11 @@ export default function Home() {
               disabled={busy || !selectedParticipantId || saveableVisibleCount === 0}
               className="mt-5 min-h-12 w-full rounded-md bg-[#c23d2f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#c9a7a2]"
             >
-              {activeTab === "brasil" ? "Salvar palpites do Brasil" : "Salvar palpites dos jogos exibidos"}
+              {activeTab === "brasil"
+                ? "Salvar palpites do Brasil"
+                : activeTab === "matamata"
+                  ? "Salvar palpites liberados do mata-mata"
+                  : "Salvar palpites dos jogos exibidos"}
             </button>
           </form>
 
