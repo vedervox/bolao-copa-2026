@@ -1400,21 +1400,11 @@ export default function Home() {
 
                   return (
                   <section key={day.dayKey} className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-3">
-                    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-black capitalize">{day.label}</h3>
-                        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#5e6a63]">
-                          {day.matches.length} jogos
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => saveDayGuesses(day.label, day.matches)}
-                        disabled={busy || !selectedParticipantId || daySaveableCount === 0}
-                        className="min-h-10 rounded-md bg-[#1d6b57] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
-                      >
-                        {daySaveableCount > 0 ? "Salvar este dia" : "Aguardando times"}
-                      </button>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-black capitalize">{day.label}</h3>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#5e6a63]">
+                        {day.matches.length} jogos
+                      </span>
                     </div>
 
                     <div className="grid gap-3">
@@ -1515,6 +1505,15 @@ export default function Home() {
                         );
                       })}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => saveDayGuesses(day.label, day.matches)}
+                      disabled={busy || !selectedParticipantId || daySaveableCount === 0}
+                      className="mt-4 min-h-12 w-full rounded-md bg-[#1d6b57] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+                    >
+                      {daySaveableCount > 0 ? "Salvar este dia" : "Aguardando times"}
+                    </button>
                   </section>
                   );
                 })
