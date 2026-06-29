@@ -87,6 +87,12 @@ const emptyData: BolaoData = {
 
 const GUESS_DEADLINE_MINUTES = 5;
 const FIRST_BRAZIL_MATCH_DATE = new Date("2026-06-13T22:00:00.000Z");
+const SESSION_STORAGE_KEY = "bolao-copa-session";
+
+type StoredSession = {
+  participantId: number;
+  accessCode: string;
+};
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR", {
@@ -380,6 +386,30 @@ function ScoreComparison({ match, guess }: { match: Match; guess: Guess }) {
   );
 }
 
+function readStoredSession(): StoredSession | null {
+  try {
+    const value = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!value) return null;
+    const parsed = JSON.parse(value) as Partial<StoredSession>;
+
+    if (typeof parsed.participantId !== "number" || typeof parsed.accessCode !== "string") {
+      return null;
+    }
+
+    return { participantId: parsed.participantId, accessCode: parsed.accessCode };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: StoredSession) {
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+function clearStoredSession() {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
 export default function Home() {
   const [data, setData] = useState<BolaoData>(emptyData);
   const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null);
@@ -415,6 +445,18 @@ export default function Home() {
     setLoginParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
     setViewedParticipantId((current) => current ?? nextData.participants[0]?.id ?? null);
     setSelectedMatchId((current) => current ?? nextData.matches[0]?.id ?? null);
+    const storedSession = readStoredSession();
+    const storedParticipant = storedSession
+      ? nextData.participants.find((participant) => participant.id === storedSession.participantId)
+      : null;
+
+    if (storedSession && storedParticipant) {
+      setSelectedParticipantId((current) => current ?? storedParticipant.id);
+      setLoginParticipantId((current) => current ?? storedParticipant.id);
+      setViewedParticipantId((current) => current ?? storedParticipant.id);
+      setAccessCode((current) => current || storedSession.accessCode);
+    }
+
     setMessage("Tudo pronto para os palpites.");
   }
 
@@ -689,6 +731,7 @@ export default function Home() {
         setLoginParticipantId(result.participant.id);
         setViewedParticipantId(result.participant.id);
         setAccessCode(pin);
+        writeStoredSession({ participantId: result.participant.id, accessCode: pin });
       }
 
       setName("");
@@ -721,6 +764,7 @@ export default function Home() {
       if (result.participant) {
         setSelectedParticipantId(result.participant.id);
         setViewedParticipantId(result.participant.id);
+        writeStoredSession({ participantId: result.participant.id, accessCode });
       }
 
       await load();
@@ -735,6 +779,7 @@ export default function Home() {
   function logout() {
     setSelectedParticipantId(null);
     setAccessCode("");
+    clearStoredSession();
     setMessage("Escolha seu nome e entre com seu PIN antes de palpitar.");
   }
 
@@ -804,6 +849,16 @@ export default function Home() {
       return;
     }
 
+    const storedSession = readStoredSession();
+    const activeAccessCode =
+      accessCode.trim() ||
+      (storedSession?.participantId === selectedParticipantId ? storedSession.accessCode : "");
+
+    if (activeAccessCode.length < 4) {
+      setMessage("Entre com o PIN antes de salvar os palpites.");
+      return;
+    }
+
     const saveableMatches = matchesToSave.filter(isSaveableMatch);
 
     if (saveableMatches.length === 0) {
@@ -824,7 +879,7 @@ export default function Home() {
           homeGuess: draft.homeGuess,
           awayGuess: draft.awayGuess,
           qualifiedTeamGuess: draft.qualifiedTeamGuess,
-          accessCode,
+          accessCode: activeAccessCode,
         });
       }
 
