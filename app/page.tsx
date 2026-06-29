@@ -672,18 +672,34 @@ export default function Home() {
     }
   }
 
-  function addParticipant(event: FormEvent<HTMLFormElement>) {
+  async function addParticipant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const participantName = name.trim();
     const pin = newParticipantPin.trim();
     if (!participantName || pin.length < 4) return;
 
-    send(
-      { action: "addParticipant", name: participantName, accessCode: pin },
-      `${participantName} entrou no bolão.`
-    );
-    setName("");
-    setNewParticipantPin("");
+    setBusy(true);
+    setMessage("Criando perfil e entrando...");
+
+    try {
+      const result = await post({ action: "addParticipant", name: participantName, accessCode: pin });
+
+      if (result.participant) {
+        setSelectedParticipantId(result.participant.id);
+        setLoginParticipantId(result.participant.id);
+        setViewedParticipantId(result.participant.id);
+        setAccessCode(pin);
+      }
+
+      setName("");
+      setNewParticipantPin("");
+      await load();
+      setMessage(`${participantName} entrou no bolão. Agora é só lançar e salvar os palpites.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao cadastrar.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function login() {
@@ -1214,6 +1230,9 @@ export default function Home() {
                 className="rounded-lg border border-[#d7dfd9] bg-[#f8faf8] p-4"
               >
                 <h3 className="text-base font-black">Primeiro acesso</h3>
+                <p className="mt-1 text-sm font-bold text-[#1d6b57]">
+                  Ao cadastrar, você já entra automaticamente para salvar palpites.
+                </p>
                 <div className="mt-3 grid gap-3 md:grid-cols-[1fr_140px_auto] xl:grid-cols-1">
                   <label className="text-sm font-semibold" htmlFor="name">
                     Nome
@@ -1241,7 +1260,7 @@ export default function Home() {
                       disabled={busy || !name.trim() || newParticipantPin.trim().length < 4}
                       className="min-h-12 w-full rounded-md bg-[#18211f] px-5 font-bold text-white disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
                     >
-                      Cadastrar
+                      Cadastrar e entrar
                     </button>
                   </div>
                 </div>
@@ -1273,7 +1292,7 @@ export default function Home() {
 
             {!selectedParticipantId && (
               <p className="mt-4 rounded-md bg-[#fff4d2] px-3 py-2 text-sm font-bold text-[#7a5a00]">
-                Entre ou cadastre um participante no bloco acima antes de salvar palpites.
+                Entre com seu nome e PIN, ou faça o primeiro cadastro. Depois disso os palpites podem ser salvos.
               </p>
             )}
 

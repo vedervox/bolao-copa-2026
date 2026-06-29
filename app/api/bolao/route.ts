@@ -557,7 +557,28 @@ export async function POST(request: Request) {
       }
 
       const exactMatches = await supabase<ParticipantRow[]>(`participants?select=*&name=eq.${encodeURIComponent(name)}&limit=1`);
-      if (exactMatches[0]) return Response.json({ participant: toParticipant(exactMatches[0]) });
+      if (exactMatches[0]) {
+        const existing = exactMatches[0];
+
+        if (existing.access_code && existing.access_code !== accessCode) {
+          return Response.json(
+            { error: "Esse nome já existe. Use o PIN correto para entrar." },
+            { status: 401 }
+          );
+        }
+
+        if (!existing.access_code) {
+          await supabase<null>(`participants?id=eq.${existing.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ access_code: accessCode }),
+            prefer: "return=minimal",
+          });
+        }
+
+        return Response.json({
+          participant: toParticipant({ ...existing, access_code: existing.access_code ?? accessCode }),
+        });
+      }
 
       const avatar = name
         .split(/\s+/)
